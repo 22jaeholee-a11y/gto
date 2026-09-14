@@ -77,3 +77,21 @@ export function foldThrough(tree: LightTree, path: number[], seat: number): numb
   }
   return null;
 }
+
+export interface RareStep {
+  seat: number;
+  label: string;
+  freq: number;
+}
+
+/** Steps on the path that the acting player's range almost never takes at equilibrium. */
+export function rareSteps(result: SolveResult, trail: TrailStep[], threshold = 0.001): RareStep[] {
+  const out: RareStep[] = [];
+  for (let i = 0; i < trail.length; i++) {
+    const { node, action } = trail[i];
+    const reach = playerReach(result, trail.slice(0, i), node.player);
+    const { freq } = actionTotals(result, node, reach);
+    if (freq[action] < threshold) out.push({ seat: node.player, label: label(node.actions[action], node), freq: freq[action] });
+  }
+  return out;
+}

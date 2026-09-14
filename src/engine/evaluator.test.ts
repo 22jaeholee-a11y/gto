@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate7 } from './evaluator';
+import { BoardEvaluator, evaluate7 } from './evaluator';
 import { classCombos, classLabel, COMBOS, COMPAT, compatMul, NUM_CLASSES } from './cards';
 
 const RANKS = '23456789TJQKA';
@@ -30,6 +30,20 @@ describe('evaluate7', () => {
     expect(ev('Ac Ad Kh 9s 7c 3d 2h')).toBe(ev('Ah As Kd 9c 7h 3s 2d'));
     // two trips -> full house using second trips as pair
     expect(ev('Ac Ad Ah Ks Kc Kd 2h')).toBeGreaterThan(ev('Ac Ad Ah Qs Qc Qd 2h'));
+  });
+});
+
+describe('BoardEvaluator', () => {
+  it('matches evaluate7 for random hands', () => {
+    let seed = 3;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const be = new BoardEvaluator();
+    for (let t = 0; t < 3000; t++) {
+      const deck = Array.from({ length: 52 }, (_, i) => i);
+      for (let k = 0; k < 7; k++) { const j = k + Math.floor(rand() * (52 - k)); [deck[k], deck[j]] = [deck[j], deck[k]]; }
+      be.setBoard(deck.slice(2, 7));
+      expect(be.eval2(deck[0], deck[1])).toBe(evaluate7(deck.slice(0, 7)));
+    }
   });
 });
 

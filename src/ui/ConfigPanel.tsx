@@ -52,7 +52,7 @@ export function ConfigPanel({ config, onChange, solve, onStart, onStop }: Props)
           </label>
           <label className="field">
             <span>BB 앤티</span>
-            <input type="number" step="0.1" min="0" value={config.ante} disabled={running}
+            <input type="number" inputMode="decimal" step="0.1" min="0" value={config.ante} disabled={running}
               onChange={(e) => set({ ante: Math.max(0, Number(e.target.value)) })} />
           </label>
         </div>
@@ -68,7 +68,7 @@ export function ConfigPanel({ config, onChange, solve, onStart, onStop }: Props)
           {config.stacks.map((s, i) => (
             <label key={names[i]} className="stack-input">
               <span>{names[i]}</span>
-              <input type="number" min="2" step="0.5" value={s} disabled={running}
+              <input type="number" inputMode="decimal" min="2" step="0.5" value={s} disabled={running}
                 onChange={(e) => {
                   const next = config.stacks.slice();
                   next[i] = Math.max(2, Number(e.target.value));
@@ -169,7 +169,7 @@ function NumField({ label, value, step, disabled, onChange }: { label: string; v
   return (
     <label className="field">
       <span>{label}</span>
-      <input type="number" value={value} step={step} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="number" inputMode="decimal" value={value} step={step} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
     </label>
   );
 }

@@ -61,3 +61,25 @@ describe('buildTree', () => {
     console.log(`8-max 25bb nodes=${t.nodes.length} decisions=${t.numDecisions}`);
   });
 });
+
+describe('buildTree with random stacks', () => {
+  it('always builds (no 4-way all-in) and keeps utilities zero-sum', () => {
+    let seed = 12345;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let trial = 0; trial < 60; trial++) {
+      const n = 2 + Math.floor(rand() * 7);
+      const stacks = Array.from({ length: n }, () => Math.round((3 + rand() * 60) * 2) / 2);
+      const t = buildTree(cfg({ stacks, ante: rand() < 0.5 ? 1 : 0, payouts: [50, 30, 20] }));
+      for (const nd of t.nodes) {
+        if (nd.kind !== 'terminal') continue;
+        if (nd.tType === 'showdown') expect(nd.participants.length).toBeLessThanOrEqual(3);
+        if (nd.tType === 'flop') expect(nd.participants.length).toBeLessThanOrEqual(4);
+        for (let o = 0; o < nd.outcomes.length; o++) {
+          let c = 0;
+          for (let j = 0; j < n; j++) c += nd.utilChip[o * n + j];
+          expect(Math.abs(c)).toBeLessThan(1e-6);
+        }
+      }
+    }
+  }, 120_000);
+});

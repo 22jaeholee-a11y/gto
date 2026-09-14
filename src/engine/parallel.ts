@@ -3,7 +3,7 @@
 // executors own the subtrees; one iteration = collect reach at frontier -> run subtrees -> apply.
 
 import { NUM_CLASSES } from './cards';
-import { exploitabilityOf, rootValues, Solver, type Pass, type SolveResult } from './solver';
+import { exploitabilityOf, finalize, rootValues, Solver, type FrontierItem, type Pass, type SolveResult } from './solver';
 import type { GameTree } from './tree';
 
 const N = NUM_CLASSES;
@@ -26,11 +26,19 @@ export interface SubtreeExecutor {
   exportPart(part: number): Promise<PartExport>;
 }
 
-export function subtreeSizes(tree: GameTree): Int32Array {
-  const size = new Int32Array(tree.nodes.length).fill(1);
+/** estimated work per subtree: showdowns with more players and fold removal dominate the cost */
+export function subtreeSizes(tree: GameTree): Float64Array {
+  const size = new Float64Array(tree.nodes.length);
   for (let i = tree.nodes.length - 1; i >= 0; i--) {
     const nd = tree.nodes[i];
-    if (nd.kind === 'decision') for (const a of nd.actions) size[i] += size[a.child];
+    if (nd.kind === 'decision') {
+      size[i] = 2 * nd.actions.length;
+      for (const a of nd.actions) size[i] += size[a.child];
+    } else if (nd.tType === 'fold') {
+      size[i] = 1;
+    } else {
+      size[i] = nd.participants.length === 2 ? 4 : 12;
+    }
   }
   return size;
 }
@@ -78,6 +86,8 @@ export class Coordinator {
   private exec: SubtreeExecutor;
   private partOf = new Map<number, number>();
   iteration = 0;
+  /** cumulative milliseconds per phase, for diagnosing parallel overhead */
+  readonly timing = { collect: 0, workers: 0, apply: 0, slowest: 0 };
 
   constructor(tree: GameTree, plan: PartitionPlan, exec: SubtreeExecutor) {
     this.tree = tree;
@@ -90,20 +100,34 @@ export class Coordinator {
   private async pass(pass: Pass, util: 'icm' | 'chip', store?: Float32Array): Promise<Float64Array> {
     const n = this.tree.numPlayers;
     this.top.iterations = this.iteration;
+    const t0 = performance.now();
     const items = this.top.collectFrontier(pass, util);
-    const groups: Array<Array<{ id: number; reach: Float64Array }>> = this.plan.assignment.map(() => []);
+    const t1 = performance.now();
+    const groups: FrontierItem[][] = this.plan.assignment.map(() => []);
     for (const it of items) groups[this.partOf.get(it.id)!].push(it);
+    const partMs: number[] = [];
     const outs = await Promise.all(
       groups.map((g, p) => {
+        const ts = performance.now();
         const ids = Int32Array.from(g, (x) => x.id);
         const reach = new Float64Array(g.length * n * N);
         g.forEach((x, i) => reach.set(x.reach, i * n * N));
-        return this.exec.run(p, pass, util, this.iteration, ids, reach, store !== undefined);
+        return this.exec.run(p, pass, util, this.iteration, ids, reach, store !== undefined).then((r) => {
+          partMs[p] = performance.now() - ts;
+          return r;
+        });
       }),
     );
+    const t2 = performance.now();
     const results = new Map<number, Float64Array>();
     groups.forEach((g, p) => g.forEach((x, i) => results.set(x.id, outs[p].subarray(i * n * N, (i + 1) * n * N))));
-    return this.top.applyFrontier(pass, util, results, store);
+    const root = this.top.applyFrontier(pass, util, results, store);
+    const t3 = performance.now();
+    this.timing.collect += t1 - t0;
+    this.timing.workers += t2 - t1;
+    this.timing.apply += t3 - t2;
+    this.timing.slowest += Math.max(...partMs) - partMs.reduce((a, b) => a + b, 0) / partMs.length;
+    return root;
   }
 
   async run(count: number): Promise<void> {
@@ -156,6 +180,17 @@ export class Coordinator {
     merge(exportPart(this.top, topIcm, topChip));
     for (let p = 0; p < this.plan.assignment.length; p++) merge(await this.exec.exportPart(p));
 
+    if ((tree.config.smoothing ?? 0) > 0) {
+      // softening needs every node's EV each round: run it on one full solver seeded with the merged strategy
+      const full = new Solver(tree);
+      for (const nd of tree.nodes) {
+        if (nd.kind !== 'decision') continue;
+        const from = offsets[nd.dIndex];
+        full.stratSum.set(strategy.subarray(from, from + nd.actions.length * N), full.offsets[nd.dIndex]);
+      }
+      const res = finalize(full);
+      return { ...res, iterations: this.iteration };
+    }
     return { offsets, strategy, evIcm, evChip, rootIcm, rootChip, exploitability, iterations: this.iteration };
   }
 }

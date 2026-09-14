@@ -15,7 +15,7 @@ export interface LightTree {
   config: SolverConfig;
 }
 
-export type ToWorker = { type: 'solve'; config: SolverConfig };
+export type ToWorker = { type: 'solve'; config: SolverConfig; /** cap on worker threads (default: device budget) */ maxThreads?: number };
 
 export type FromWorker =
   | { type: 'tree'; tree: LightTree; buildMs: number }

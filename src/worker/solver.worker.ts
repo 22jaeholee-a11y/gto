@@ -36,7 +36,8 @@ class WorkerExecutor implements SubtreeExecutor {
     const workers = assignment.map(() => new Worker(new URL('./subtree.worker.ts', import.meta.url), { type: 'module' }));
     const exec = new WorkerExecutor(workers);
     try {
-      await Promise.all(assignment.map((roots, i) => exec.request(i, { type: 'init', config, roots })));
+      // some mobile browsers lack nested workers or stall loading them; fall back after a timeout
+      await withTimeout(Promise.all(assignment.map((roots, i) => exec.request(i, { type: 'init', config, roots }))), 20000);
     } catch (err) {
       exec.terminate();
       throw err;
@@ -66,6 +67,24 @@ class WorkerExecutor implements SubtreeExecutor {
   }
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('서브 워커 응답 없음')), ms);
+    p.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+/** Threads to use: leave a core for the UI, and stay modest on phones to limit memory. */
+function threadBudget(): number {
+  const nav = (self as unknown as { navigator?: Navigator & { deviceMemory?: number } }).navigator;
+  const cores = nav?.hardwareConcurrency ?? 4;
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(nav?.userAgent ?? '');
+  const memory = nav?.deviceMemory;
+  let cap = mobile ? 4 : 12;
+  if (memory !== undefined && memory <= 4) cap = Math.min(cap, 3);
+  return Math.max(1, Math.min(cores - 1, cap));
+}
+
 async function solveParallel(tree: GameTree, threads: number, t0: number) {
   const plan = planPartition(tree, threads);
   if (!plan) return null;
@@ -86,6 +105,8 @@ async function solveParallel(tree: GameTree, threads: number, t0: number) {
       post({ type: 'progress', iteration: it, total, exploitability: expl, elapsedMs: performance.now() - t0, threads: plan.assignment.length });
     }
     return await coord.finalize();
+  } catch {
+    return null; // a sub-worker failed (e.g. killed for memory): redo on a single thread
   } finally {
     exec.terminate();
   }
@@ -106,7 +127,7 @@ function solveSingle(tree: GameTree, t0: number) {
 
 self.onmessage = async (e: MessageEvent<ToWorker>) => {
   if (e.data.type !== 'solve') return;
-  const { config } = e.data;
+  const { config, maxThreads } = e.data;
   try {
     const t0 = performance.now();
     const tree = buildTree(config);
@@ -117,8 +138,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
     });
     post({ type: 'tree', tree: { ...tree, nodes }, buildMs: performance.now() - t0 });
 
-    const cores = (self as unknown as { navigator?: Navigator }).navigator?.hardwareConcurrency ?? 4;
-    const threads = Math.max(1, Math.min(cores - 1, 12));
+    const threads = Math.max(1, Math.min(threadBudget(), maxThreads ?? Infinity));
     const t1 = performance.now();
     const result = (await solveParallel(tree, threads, t1)) ?? solveSingle(tree, t1);
     post({ type: 'done', result, elapsedMs: performance.now() - t1 }, [

@@ -6,12 +6,14 @@
 //                (opponent reach × utility), with card removal between the hero and each opponent.
 
 import { COMBOS, compatMul, NUM_CLASSES } from './cards';
-import { matVec, WIN } from './equity';
+import { BROADWAY, BROADWAY_RANDOM, DEAD_WIN, matVec, matVec2, WIN } from './equity';
+import { icmEquity } from './icm';
+import { firstVs } from './multiway';
 import type { DecisionNode, GameTree, TerminalNode } from './tree';
 
 const N = NUM_CLASSES;
-const ALPHA = 1.5;
-const GAMMA = 2;
+/** DCFR discounting (Brown & Sandholm 2019): positive regrets t^α/(t^α+1), negative 1/2, averages (t/(t+1))^γ */
+export const DCFR = { alpha: 1.5, gamma: 2 };
 
 export interface SolveProgress {
   iteration: number;
@@ -54,14 +56,17 @@ export const PLAYABILITY: Float64Array = (() => {
 
 export type Pass = 'train' | 'ev' | 'br';
 
-/** lazily computed WIN · reach for one reach vector */
-interface WvSlot { vec: Float64Array; ok: boolean }
+/** lazily computed WIN · reach and DEAD_WIN · reach for one reach vector */
+interface WvSlot { vec: Float64Array; ok: boolean; dead: Float64Array; deadOk: boolean }
 
 /**
  * Restricts a solver to part of the tree, for parallel solving.
  * roots: subtrees this solver owns. frontier: node ids where the walk stops and
  * uses externally computed values instead (the coordinator's view of worker subtrees).
  */
+/** reach vectors (n × 169) arriving at a frontier node */
+export interface FrontierItem { id: number; reach: Float64Array }
+
 export interface TreePart {
   roots: number[];
   frontier?: number[];
@@ -81,15 +86,23 @@ export class Solver {
   private collecting = false;
   private frontierIds: Set<number> | null = null;
   private frontierOut: Map<number, Float64Array> | null = null;
-  private collected: Array<{ id: number; reach: Float64Array }> = [];
+  private collected: FrontierItem[] = [];
   private util: 'icm' | 'chip';
   private evOut: Float32Array | null = null;
-  private pool: Array<{ reach: Float64Array; cm: Float64Array; wv: WvSlot; out: Float64Array; act: Float64Array; sigma: Float64Array; mass: Float64Array; saved: Float64Array; value: Float64Array }> = [];
+  private pool: Array<{ reach: Float64Array; cm: Float64Array; wv: WvSlot; foldReach: Float64Array[]; foldCm: Float64Array[]; foldWv: WvSlot[]; cmHat: Float64Array; saveReach: Float64Array[]; saveCm: Float64Array[]; saveWv: WvSlot[]; out: Float64Array; act: Float64Array; sigma: Float64Array; mass: Float64Array; saved: Float64Array; value: Float64Array }> = [];
   /** per node id: outcome index for participant-index ranking (i*9 + j*3 + k), or winner index for 2-way */
   private orderIdx: Array<Int8Array | null> = [];
   private isPart = new Int8Array(8);
   private S = new Float64Array(16);
-  private tmp = { prod: new Float64Array(0), accum: new Float64Array(N), wv: [] as Float64Array[], b: [] as Float64Array[] };
+  private tmp = {
+    prod: new Float64Array(0),
+    wv: [] as Float64Array[],
+    wvAdj: [0, 1, 2, 3].map(() => new Float64Array(N)),
+    first: [0, 1, 2, 3].map(() => new Float64Array(N)),
+    q: new Float64Array(4),
+    rbar: new Float64Array(4),
+    orderP: new Float64Array(6),
+  };
 
   constructor(tree: GameTree, part: TreePart = { roots: [0] }) {
     this.tree = tree;
@@ -124,7 +137,7 @@ export class Solver {
       });
       this.orderIdx.push(tbl);
     }
-    for (let i = 0; i < 4; i++) { this.tmp.wv.push(new Float64Array(N)); this.tmp.b.push(new Float64Array(N)); }
+    for (let i = 0; i < 4; i++) this.tmp.wv.push(new Float64Array(N));
   }
 
   get iterations() { return this.iteration; }
@@ -134,7 +147,14 @@ export class Solver {
       this.pool.push({
         reach: new Float64Array(N),
         cm: new Float64Array(N),
-        wv: { vec: new Float64Array(N), ok: false },
+        wv: { vec: new Float64Array(N), ok: false, dead: new Float64Array(N), deadOk: false },
+        foldReach: Array.from({ length: this.n }, () => new Float64Array(N)),
+        foldCm: Array.from({ length: this.n }, () => new Float64Array(N)),
+        foldWv: Array.from({ length: this.n }, () => ({ vec: new Float64Array(N), ok: false, dead: new Float64Array(N), deadOk: false })),
+        cmHat: new Float64Array(N),
+        saveReach: new Array<Float64Array>(this.n),
+        saveCm: new Array<Float64Array>(this.n),
+        saveWv: new Array<WvSlot>(this.n),
         out: new Float64Array(this.n * N),
         act: new Float64Array(8 * N),
         sigma: new Float64Array(8 * N),
@@ -153,7 +173,7 @@ export class Solver {
     for (let p = 0; p < this.n; p++) {
       reach.push(new Float64Array(N).fill(1));
       cm.push(new Float64Array(N).fill(1));
-      wv.push({ vec: new Float64Array(N), ok: false });
+      wv.push({ vec: new Float64Array(N), ok: false, dead: new Float64Array(N), deadOk: false });
     }
     return { reach, cm, wv };
   }
@@ -205,7 +225,7 @@ export class Solver {
   // ---- parallel solving: coordinator side ----
 
   /** Reach vectors (n × 169 per item) arriving at each frontier node for this pass. */
-  collectFrontier(pass: Pass, util: 'icm' | 'chip'): Array<{ id: number; reach: Float64Array }> {
+  collectFrontier(pass: Pass, util: 'icm' | 'chip'): FrontierItem[] {
     this.setPass(pass, util, null);
     this.collecting = true;
     this.collected = [];
@@ -250,12 +270,54 @@ export class Solver {
         const c = new Float64Array(N);
         compatMul(v, c);
         cm.push(c);
-        wv.push({ vec: new Float64Array(N), ok: false });
+        wv.push({ vec: new Float64Array(N), ok: false, dead: new Float64Array(N), deadOk: false });
       }
       this.walk(ids[i], 0, r, cm, wv, outs.subarray(i * n * N, (i + 1) * n * N));
     }
     this.evOut = null;
     return outs;
+  }
+
+  /**
+   * Softens near-indifferent choices of the solved strategy. For every hand, each action gets a frequency
+   * floor of exp((EV − best EV) / τ) / Σ exp(…) (its logit share): actions a fraction of a big blind apart
+   * split the hand by their EV gap instead of one taking 99%, while actions far behind stay at zero.
+   * Mixes the solver already plays above the floor are kept, then each hand is renormalized.
+   *
+   * This is a single pass on the converged solution. Re-optimizing everyone's response to the softened
+   * strategies (a logit equilibrium) cascades through the tree and was unstable, so it is not attempted.
+   * τ is in bb and converted to ICM %p per player.
+   */
+  smooth(tauBB: number): void {
+    const util = this.tree.config.mode;
+    const tau = playerTemperatures(this.tree, tauBB, util);
+    this.stratSum.set(this.averageStrategy());
+    const ev = new Float32Array(this.stratSum.length);
+    this.evaluate(util, ev);
+    const w = new Float64Array(8);
+    for (const nd of this.owned) {
+      const A = nd.actions.length;
+      const off = this.offsets[nd.dIndex];
+      const t = tau[nd.player];
+      for (let h = 0; h < N; h++) {
+        let best = -Infinity;
+        for (let a = 0; a < A; a++) { const e = ev[off + a * N + h]; if (Number.isFinite(e) && e > best) best = e; }
+        if (best === -Infinity) continue;
+        let sum = 0;
+        for (let a = 0; a < A; a++) {
+          const e = ev[off + a * N + h];
+          w[a] = Number.isFinite(e) ? Math.exp(Math.max(-50, (e - best) / t)) : 0;
+          sum += w[a];
+        }
+        let total = 0;
+        for (let a = 0; a < A; a++) {
+          const i = off + a * N + h;
+          this.stratSum[i] = Math.max(this.stratSum[i], w[a] / sum);
+          total += this.stratSum[i];
+        }
+        for (let a = 0; a < A; a++) this.stratSum[off + a * N + h] /= total;
+      }
+    }
   }
 
   averageStrategy(): Float32Array {
@@ -290,6 +352,48 @@ export class Solver {
         for (let a = 0; a < A; a++) sum += this.stratSum[off + a * N + h];
         for (let a = 0; a < A; a++) sigma[a * N + h] = sum > 0 ? this.stratSum[off + a * N + h] / sum : 1 / A;
       }
+    }
+  }
+
+  /**
+   * Weight the ranges of players still in the hand by the chance that each of their hands is
+   * compatible with the folder's range (pairwise card removal from folded players).
+   */
+  private applyFoldRemoval(
+    nd: DecisionNode, buf: ReturnType<Solver['buffers']>, folderReach: Float64Array, folderCm: Float64Array,
+    reach: Float64Array[], cm: Float64Array[], wv: WvSlot[],
+  ): boolean {
+    let mass = 0;
+    for (let h = 0; h < N; h++) mass += COMBOS[h] * folderReach[h];
+    mass /= 1326;
+    if (mass <= 0) return false;
+    const hat = buf.cmHat;
+    for (let h = 0; h < N; h++) hat[h] = folderCm[h] / mass;
+    for (let p = 0; p < this.n; p++) {
+      if (p === nd.player || nd.folded[p]) continue;
+      buf.saveReach[p] = reach[p];
+      buf.saveCm[p] = cm[p];
+      buf.saveWv[p] = wv[p];
+      const src = reach[p];
+      const dst = buf.foldReach[p];
+      for (let h = 0; h < N; h++) dst[h] = src[h] * hat[h];
+      if (!this.collecting) compatMul(dst, buf.foldCm[p]);
+      const slot = buf.foldWv[p];
+      slot.ok = false;
+      slot.deadOk = false;
+      reach[p] = dst;
+      cm[p] = buf.foldCm[p];
+      wv[p] = slot;
+    }
+    return true;
+  }
+
+  private restoreFoldRemoval(nd: DecisionNode, buf: ReturnType<Solver['buffers']>, reach: Float64Array[], cm: Float64Array[], wv: WvSlot[]) {
+    for (let p = 0; p < this.n; p++) {
+      if (p === nd.player || nd.folded[p]) continue;
+      reach[p] = buf.saveReach[p];
+      cm[p] = buf.saveCm[p];
+      wv[p] = buf.saveWv[p];
     }
   }
 
@@ -335,14 +439,32 @@ export class Solver {
         childReach[h] = v;
         if (v !== 0) any = true;
       }
-      if (this.collecting) { /* only reach is needed on the way to the frontier */ }
-      else if (any) compatMul(childReach, childCm);
+      const fold = nd.actions[a].type === 'fold';
+      if (any && (fold || !this.collecting)) compatMul(childReach, childCm);
       else childCm.fill(0);
       buf.wv.ok = false;
+      buf.wv.deadOk = false;
       reach[q] = childReach;
       cm[q] = childCm;
       wv[q] = buf.wv;
+      // a fold removes the folder's likely cards from everyone still in the hand
+      const removal = fold && any && this.applyFoldRemoval(nd, buf, childReach, childCm, reach, cm, wv);
       this.walk(nd.actions[a].child, depth + 1, reach, cm, wv, out);
+      if (removal) {
+        this.restoreFoldRemoval(nd, buf, reach, cm, wv);
+        // the folder's own values must not see its removal applied to the others (its hand is known)
+        if (!this.collecting) {
+          for (let h = 0; h < N; h++) {
+            let ratio = 1;
+            for (let p = 0; p < n; p++) {
+              if (p === q || nd.folded[p]) continue;
+              const after = buf.foldCm[p][h];
+              if (after > 0) ratio *= cm[p][h] / after;
+            }
+            out[qb + h] *= ratio;
+          }
+        }
+      }
       reach[q] = parentReach;
       cm[q] = parentCm;
       wv[q] = parentWv;
@@ -369,10 +491,10 @@ export class Solver {
     const off = this.offsets[nd.dIndex];
     if (this.pass === 'train') {
       const t = this.iteration;
-      const pw = Math.pow(t, ALPHA);
+      const pw = Math.pow(t, DCFR.alpha);
       const posD = pw / (pw + 1);
       const negD = 0.5;
-      const sD = Math.pow(t / (t + 1), GAMMA);
+      const sD = Math.pow(t / (t + 1), DCFR.gamma);
       for (let a = 0; a < A; a++) {
         for (let h = 0; h < N; h++) {
           const i = off + a * N + h;
@@ -429,11 +551,32 @@ export class Solver {
     for (let i = 0; i < k; i++) isPart[parts[i]] = i;
 
     // WV[i][h] = mass of participant i's range that a hero combo of class h beats
+    // expected extra broadway cards among folded players' hands shifts every board
+    let deadBroadway = 0;
+    for (let p = 0; p < n; p++) {
+      if (!t.folded[p]) continue;
+      const r = reach[p];
+      let num = 0, den = 0;
+      for (let h = 0; h < N; h++) { const w = COMBOS[h] * r[h]; num += w * BROADWAY[h]; den += w; }
+      if (den > 0) deadBroadway += num / den - BROADWAY_RANDOM;
+    }
     const WV = this.tmp.wv;
     for (let i = 0; i < k; i++) {
       const slot = wv[parts[i]];
+      // below 0.02 extra dead broadway cards the equity shift is under ~0.05%
+      const needDead = Math.abs(deadBroadway) >= 0.02;
+      if (needDead && !slot.ok && !slot.deadOk) {
+        matVec2(WIN, DEAD_WIN, reach[parts[i]], slot.vec, slot.dead);
+        slot.ok = true;
+        slot.deadOk = true;
+      }
       if (!slot.ok) { matVec(WIN, reach[parts[i]], slot.vec); slot.ok = true; }
-      WV[i] = slot.vec;
+      if (!needDead) { WV[i] = slot.vec; continue; }
+      if (!slot.deadOk) { matVec(DEAD_WIN, reach[parts[i]], slot.dead); slot.deadOk = true; }
+      const adj = this.tmp.wvAdj[i];
+      const c = cm[parts[i]];
+      for (let h = 0; h < N; h++) adj[h] = Math.min(c[h], Math.max(0, slot.vec[h] + deadBroadway * slot.dead[h]));
+      WV[i] = adj;
     }
 
     // scalar S[i][j] = P(range i beats range j)
@@ -459,6 +602,44 @@ export class Solver {
     else this.flop(t, U, reach, cm, out, prod, WV, S, isPart);
   }
 
+  /**
+   * P(participant i holds the best hand) for each hero class, from pairwise equities via the
+   * multiway model, plus the range-level probability q[i] (normalized over participants).
+   */
+  private firstProbs(parts: number[], reach: Float64Array[], cm: Float64Array[], WV: Float64Array[], prod: Float64Array) {
+    const k = parts.length;
+    const P = this.tmp.first;
+    const q = this.tmp.q;
+    let qTot = 0;
+    for (let i = 0; i < k; i++) {
+      const Pi = P[i];
+      const ri = reach[parts[i]];
+      let num = 0, den = 0;
+      const pb = parts[i] * N;
+      for (let h = 0; h < N; h++) {
+        // unused when neither this hand's own value nor its range weight matters
+        if (prod[pb + h] === 0 && ri[h] === 0) { Pi[h] = 0; continue; }
+        let b1 = -1, b2 = -1, b3 = -1, mass = 1;
+        for (let j = 0; j < k; j++) {
+          if (j === i) continue;
+          const c = cm[parts[j]][h];
+          mass *= c;
+          const b = c > 0 ? Math.min(1, WV[j][h] / c) : 0.5;
+          if (b1 < 0) b1 = b; else if (b2 < 0) b2 = b; else b3 = b;
+        }
+        const pf = firstVs(h, b1, b2, b3);
+        Pi[h] = pf;
+        const w = ri[h] * COMBOS[h] * mass;
+        num += w * pf;
+        den += w;
+      }
+      q[i] = den > 0 ? num / den : 1 / k;
+      qTot += q[i];
+    }
+    for (let i = 0; i < k; i++) q[i] = qTot > 0 ? q[i] / qTot : 1 / k;
+    return { P, q };
+  }
+
   private showdown(
     t: TerminalNode, U: Float64Array, reach: Float64Array[], cm: Float64Array[], out: Float64Array,
     prod: Float64Array, WV: Float64Array[], S: Float64Array, isPart: Int8Array,
@@ -467,32 +648,22 @@ export class Solver {
     const parts = t.participants;
     const k = parts.length;
     const O = t.outcomes.length;
+    const tbl = this.orderIdx[t.id]!;
 
-    // folded seats: range-level ranking probabilities (pairwise product, normalized)
-    const orderP = new Float64Array(O);
-    let tot = 0;
-    for (let o = 0; o < O; o++) {
-      const ord = t.outcomes[o];
-      let pr = 1;
-      for (let x = 0; x < ord.length; x++)
-        for (let y = x + 1; y < ord.length; y++) pr *= S[isPart[ord[x]] * 4 + isPart[ord[y]]];
-      orderP[o] = pr;
-      tot += pr;
-    }
-    for (let o = 0; o < O; o++) orderP[o] = tot > 0 ? orderP[o] / tot : 1 / O;
-
-    for (let p = 0; p < n; p++) {
-      const base = p * N;
-      const ip = isPart[p];
-      if (ip < 0) {
-        let e = 0;
-        for (let o = 0; o < O; o++) e += orderP[o] * U[o * n + p];
-        for (let h = 0; h < N; h++) out[base + h] += prod[base + h] * e;
-        continue;
-      }
-      if (k === 2) {
+    if (k === 2) {
+      // folded seats: range-level P(participant 0 wins)
+      const p0 = S[0 * 4 + 1] / Math.max(1e-12, S[0 * 4 + 1] + S[1 * 4 + 0]);
+      const o0 = tbl[0 * 2 + 1];
+      for (let p = 0; p < n; p++) {
+        const base = p * N;
+        const ip = isPart[p];
+        if (ip < 0) {
+          const e = p0 * U[o0 * n + p] + (1 - p0) * U[(1 - o0) * n + p];
+          for (let h = 0; h < N; h++) out[base + h] += prod[base + h] * e;
+          continue;
+        }
         const opp = parts[1 - ip];
-        const oWin = this.orderIdx[t.id]![ip * 2 + (1 - ip)];
+        const oWin = tbl[ip * 2 + (1 - ip)];
         const uWin = U[oWin * n + p];
         const uLose = U[(1 - oWin) * n + p];
         const cOpp = cm[opp];
@@ -504,44 +675,62 @@ export class Solver {
           const others = prod[base + h] / c;
           out[base + h] += others * (uLose * c + (uWin - uLose) * wv[h]);
         }
+      }
+      return;
+    }
+
+    // 3-way: P(first) from the multiway model; the rest of the ranking follows from pairwise
+    // equities exactly: P(y > x > z) = b_z - P(first), P(x last) = 1 - b_y - b_z + P(first)
+    const { P, q } = this.firstProbs(parts, reach, cm, WV, prod);
+    const orderP = this.tmp.orderP;
+    for (let o = 0; o < O; o++) {
+      const ord = t.outcomes[o];
+      const i = isPart[ord[0]], j = isPart[ord[1]], l = isPart[ord[2]];
+      const sjl = S[j * 4 + l] / Math.max(1e-12, S[j * 4 + l] + S[l * 4 + j]);
+      orderP[o] = q[i] * sjl;
+    }
+
+    for (let p = 0; p < n; p++) {
+      const base = p * N;
+      const ip = isPart[p];
+      if (ip < 0) {
+        let e = 0;
+        for (let o = 0; o < O; o++) e += orderP[o] * U[o * n + p];
+        for (let h = 0; h < N; h++) out[base + h] += prod[base + h] * e;
         continue;
       }
-      // 3-way: pairwise-independence approximation conditioned on hero hand x vs others y, z
-      const tbl = this.orderIdx[t.id]!;
       const y = ip === 0 ? 1 : 0;
       const z = ip === 2 ? 1 : 2;
-      const syz = S[y * 4 + z];
+      const syz = S[y * 4 + z] / Math.max(1e-12, S[y * 4 + z] + S[z * 4 + y]);
       const u = (i0: number, i1: number, i2: number) => U[tbl[i0 * 9 + i1 * 3 + i2] * n + p];
       const cA = syz * u(ip, y, z) + (1 - syz) * u(ip, z, y); // hero first
       const cB = u(y, ip, z); // y > hero > z
       const cC = u(z, ip, y); // z > hero > y
       const cD = syz * u(y, z, ip) + (1 - syz) * u(z, y, ip); // hero last
       const cy = cm[parts[y]], wy = WV[y], cz = cm[parts[z]], wz = WV[z];
-      const accum = this.tmp.accum;
+      const Px = P[ip];
       for (let h = 0; h < N; h++) {
-        const by = cy[h] > 0 ? wy[h] / cy[h] : 0.5;
-        const bz = cz[h] > 0 ? wz[h] / cz[h] : 0.5;
-        accum[h] = by * bz * cA + (1 - by) * bz * cB + by * (1 - bz) * cC + (1 - by) * (1 - bz) * cD;
+        const by = cy[h] > 0 ? Math.min(1, wy[h] / cy[h]) : 0.5;
+        const bz = cz[h] > 0 ? Math.min(1, wz[h] / cz[h]) : 0.5;
+        const first = Px[h];
+        const v = first * cA + (bz - first) * cB + (by - first) * cC + (1 - by - bz + first) * cD;
+        out[base + h] += prod[base + h] * v;
       }
-      for (let h = 0; h < N; h++) out[base + h] += prod[base + h] * accum[h];
     }
   }
 
   private flop(
     t: TerminalNode, U: Float64Array, reach: Float64Array[], cm: Float64Array[], out: Float64Array,
-    prod: Float64Array, WV: Float64Array[], S: Float64Array, isPart: Int8Array,
+    prod: Float64Array, WV: Float64Array[], _S: Float64Array, isPart: Int8Array,
   ) {
     const n = this.n;
     const parts = t.participants;
     const k = parts.length;
+    const { P, q } = this.firstProbs(parts, reach, cm, WV, prod);
 
-    // range-level raw win probability and realization per participant
-    const q = new Float64Array(k);
-    const rbar = new Float64Array(k);
+    // realization per participant range
+    const rbar = this.tmp.rbar;
     for (let i = 0; i < k; i++) {
-      let pr = 1;
-      for (let j = 0; j < k; j++) if (j !== i) pr *= S[i * 4 + j];
-      q[i] = pr;
       const r = reach[parts[i]];
       let num = 0, den = 0;
       for (let h = 0; h < N; h++) { const w = r[h] * COMBOS[h]; num += w * PLAYABILITY[h]; den += w; }
@@ -558,31 +747,44 @@ export class Solver {
         for (let h = 0; h < N; h++) out[base + h] += prod[base + h] * e;
         continue;
       }
-      // loss distribution: winner among the others ∝ q * rbar
-      let tot = 0, uOthers = 0;
-      for (let i = 0; i < k; i++) if (i !== ip) tot += q[i] * rbar[i];
+      // when the hero doesn't win, the winner among the others is ∝ q * rbar
+      let tot = 0, qOthers = 0, uOthers = 0;
+      for (let i = 0; i < k; i++) if (i !== ip) { tot += q[i] * rbar[i]; qOthers += q[i]; }
       for (let i = 0; i < k; i++)
         if (i !== ip) uOthers += (tot > 0 ? (q[i] * rbar[i]) / tot : 1 / (k - 1)) * U[i * n + p];
       const uWin = U[ip * n + p];
-      let qOthers = 0;
-      for (let i = 0; i < k; i++) if (i !== ip) qOthers += q[i];
       const rOthers = qOthers > 0 ? tot / qOthers : 1;
       const eqrHero = t.eqr[ip];
+      const Px = P[ip];
       for (let h = 0; h < N; h++) {
-        let raw = 1;
-        for (let i = 0; i < k; i++) {
-          if (i === ip) continue;
-          const c = cm[parts[i]][h];
-          raw *= c > 0 ? WV[i][h] / c : 0.5;
-        }
-        const rh = eqrHero * (1 + PLAYABILITY[h] * t.playScale);
-        const a = raw * rh;
+        const raw = Px[h];
+        const a = raw * eqrHero * (1 + PLAYABILITY[h] * t.playScale);
         const b = (1 - raw) * rOthers;
         const share = a + b > 0 ? a / (a + b) : raw;
         out[base + h] += prod[base + h] * (share * uWin + (1 - share) * uOthers);
       }
     }
   }
+}
+
+/** logit temperature per player in the solver's utility: bb for chip EV, ICM %p per bb of that player's stack */
+export function playerTemperatures(tree: GameTree, tauBB: number, util: 'icm' | 'chip'): number[] {
+  const n = tree.numPlayers;
+  if (util === 'chip') return new Array(n).fill(tauBB);
+  const { stacks } = tree.config;
+  const payTotal = tree.config.payouts.reduce((x, y) => x + y, 0) || 1;
+  const payouts = tree.config.payouts.map((x) => x / payTotal);
+  return stacks.map((s, p) => {
+    const moved = (d: number) => {
+      const x = stacks.slice();
+      x[p] += d;
+      for (let j = 0; j < n; j++) if (j !== p) x[j] -= d / (n - 1);
+      return icmEquity(x, payouts)[p] * 100;
+    };
+    const d = Math.min(0.5, s / 2);
+    const slope = (moved(d) - moved(-d)) / (2 * d);
+    return Math.max(1e-6, tauBB * slope);
+  });
 }
 
 export function rootValues(out: Float64Array, n: number): number[] {
@@ -620,7 +822,13 @@ export function solve(tree: GameTree, onProgress?: (p: SolveProgress) => void, c
   return finalize(solver, expl);
 }
 
-export function finalize(solver: Solver, expl?: number): SolveResult {
+/** Final strategy and EVs. Applies the config's smoothing unless `smooth` is false (e.g. already smoothed). */
+export function finalize(solver: Solver, expl?: number, opts: { smooth?: boolean } = {}): SolveResult {
+  const tau = solver.tree.config.smoothing ?? 0;
+  if (tau > 0 && opts.smooth !== false) {
+    solver.smooth(tau);
+    expl = undefined; // the softened strategy has its own (slightly higher) exploitability
+  }
   const strategy = solver.averageStrategy();
   const evIcm = new Float32Array(strategy.length);
   const evChip = new Float32Array(strategy.length);

@@ -200,7 +200,7 @@ export function buildTree(config: SolverConfig): GameTree {
       const withChips = participants.filter((j) => !s.allin[j]).length;
       const anyAllin = participants.some((j) => s.allin[j]);
       if (anyAllin || withChips <= 1) {
-        if (participants.length > 3) throw new Error('4-way all-in should be excluded by tree rules');
+        if (participants.length > 3) throw new Error('트리 규칙 오류: 4인 이상 올인 쇼다운이 생성되었습니다');
         tType = 'showdown';
         outcomes = permutations(participants);
         finals = outcomes.map((order) => {
@@ -224,7 +224,11 @@ export function buildTree(config: SolverConfig): GameTree {
         const spr = minBehind / pot;
         const shrink = Math.min(1, Math.max(0.25, spr / 6));
         const bases = config.postflop.eqrByPlayers[k] ?? new Array(k).fill(1);
-        eqr = participants.map((_, r) => 1 + ((bases[r] ?? 1) - 1) * shrink);
+        // the last preflop raiser realizes more (initiative); a limped pot has no aggressor
+        const agg = s.level > 0 && participants.includes(s.lastRaiser) ? s.lastRaiser : -1;
+        const factors = config.postflop.aggressor ?? { ip: 1, oop: 1 };
+        const g = agg < 0 ? 1 : participants[k - 1] === agg ? factors.ip : factors.oop;
+        eqr = participants.map((j, r) => (1 + ((bases[r] ?? 1) - 1) * shrink) * (j === agg ? 1 + (g - 1) * shrink : 1));
         playScale = Math.min(1.25, Math.max(0.25, spr / 8)) * config.postflop.playability;
       }
     }
@@ -273,7 +277,10 @@ export function buildTree(config: SolverConfig): GameTree {
     }
 
     const opponentsWithChips = s.folded.some((f, j) => j !== i && !f && !s.allin[j]);
-    if (total > s.bet + EPS && opponentsWithChips) {
+    // all-in players can't fold any more, so a raise on top of three of them forces a 4-way pot
+    let allinOthers = 0;
+    for (let j = 0; j < n; j++) if (j !== i && !s.folded[j] && s.allin[j]) allinOthers++;
+    if (total > s.bet + EPS && opponentsWithChips && allinOthers + 1 <= 3) {
       if (!config.pushFoldOnly) {
         let to = -1;
         if (s.level === 0) {

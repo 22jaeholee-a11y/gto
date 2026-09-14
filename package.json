@@ -8,7 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "gen:equity": "node --experimental-strip-types scripts/gen-equity.ts"
+    "gen:equity": "esbuild scripts/gen-equity.ts --bundle --platform=node --format=esm --outfile=.audit/gen-equity.mjs --log-level=warning && node .audit/gen-equity.mjs",
+    "audit": "esbuild scripts/audit.ts --bundle --platform=node --format=esm --outfile=.audit/audit.mjs --log-level=warning && node .audit/audit.mjs",
+    "gen:multiway": "esbuild scripts/gen-multiway.ts --bundle --platform=node --format=esm --outfile=.audit/gen-multiway.mjs --log-level=warning && node .audit/gen-multiway.mjs",
+    "gen:removal": "esbuild scripts/gen-removal.ts --bundle --platform=node --format=esm --outfile=.audit/gen-removal.mjs --log-level=warning && node .audit/gen-removal.mjs",
+    "build:pool": "esbuild scripts/build-pool.ts --bundle --platform=node --format=esm --outfile=.audit/build-pool.mjs --log-level=warning && node .audit/build-pool.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

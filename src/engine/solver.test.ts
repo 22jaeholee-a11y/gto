@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { COMBOS, classLabel, NUM_CLASSES } from './cards';
 import { DEFAULT_CONFIG, type SolverConfig } from './config';
-import { finalize, Solver } from './solver';
+import { finalize, playerTemperatures, Solver } from './solver';
 import { buildTree, type DecisionNode } from './tree';
 
-const cfg = (over: Partial<SolverConfig>): SolverConfig => ({ ...DEFAULT_CONFIG, ...over });
+// solver maths is checked on the raw solution; smoothing has its own test
+const cfg = (over: Partial<SolverConfig>): SolverConfig => ({ ...DEFAULT_CONFIG, smoothing: 0, ...over });
 const idx = (label: string) => Array.from({ length: NUM_CLASSES }, (_, i) => classLabel(i)).indexOf(label);
 
 function freq(strategy: Float32Array, off: number, action: number, hand: string) {
@@ -64,6 +65,28 @@ describe('Solver', () => {
     expect(icm).toBeLessThan(chip * 0.7);
   });
 
+  it('smoothing mixes near-indifferent actions and keeps clear decisions pure', () => {
+    const tree = buildTree(cfg({ stacks: [10, 10], ante: 0, pushFoldOnly: true, mode: 'chip', payouts: [1], iterations: 0, smoothing: 0.1 }));
+    const solver = new Solver(tree);
+    solver.run(1000);
+    const res = finalize(solver);
+    const root = tree.nodes[0] as DecisionNode;
+    const off = res.offsets[root.dIndex];
+    let mixedNear = 0, pureFar = 0, near = 0, far = 0;
+    for (let h = 0; h < NUM_CLASSES; h++) {
+      const gap = Math.abs(res.evChip[off + NUM_CLASSES + h] - res.evChip[off + h]);
+      const minor = Math.min(res.strategy[off + h], res.strategy[off + NUM_CLASSES + h]);
+      if (gap < 0.05) { near++; if (minor > 0.2) mixedNear++; }
+      if (gap > 1) { far++; if (minor < 0.01) pureFar++; }
+    }
+    console.log(`smoothing: ${mixedNear}/${near} hands within 0.05bb are mixed ≥20%, ${pureFar}/${far} hands >1bb apart stay pure`);
+    expect(near).toBeGreaterThan(0);
+    expect(mixedNear).toBe(near);
+    expect(pureFar).toBe(far);
+    // the softened solution is still close to Nash
+    expect(res.exploitability).toBeLessThan(0.05);
+  });
+
   it('8-max 25bb full tree iteration speed', () => {
     const tree = buildTree(cfg({ iterations: 0 }));
     const s = new Solver(tree);
@@ -75,4 +98,17 @@ describe('Solver', () => {
     console.log(`8-max: ${tree.numDecisions} decisions, ${dt.toFixed(1)} ms/iter, expl pass ${(performance.now() - t1).toFixed(0)} ms, expl=${e.toFixed(3)}`);
     expect(Number.isFinite(e)).toBe(true);
   }, 120_000);
+});
+
+describe('playerTemperatures', () => {
+  it('converts the bb temperature to ICM %p with a plausible chip value', () => {
+    const tree = buildTree(cfg({ stacks: [30, 28, 25, 35, 22, 30, 55, 39], iterations: 0 }));
+    const t = playerTemperatures(tree, 0.1, 'icm');
+    // 100% of the pool over 264bb of chips: about 0.38%p per bb on average, less for big stacks
+    for (const x of t) {
+      expect(x).toBeGreaterThan(0.1 * 0.1);
+      expect(x).toBeLessThan(0.1 * 0.6);
+    }
+    expect(t[6]).toBeLessThan(t[4]); // 55bb chip leader values a chip less than the 22bb short stack
+  });
 });

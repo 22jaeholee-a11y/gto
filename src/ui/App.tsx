@@ -6,8 +6,9 @@ import { HandDetail } from './HandDetail';
 import { HandGrid, type GridView } from './HandGrid';
 import { SeatRail } from './SeatRail';
 import { actionColor, pct } from './format';
-import { actionTotals, label, playerReach, raiseRank, walkPath } from './spot';
+import { actionTotals, label, playerReach, raiseRank, rareSteps, walkPath } from './spot';
 import { useSolver } from './useSolver';
+import { TrainingView } from './training/TrainingView';
 
 const STORAGE_KEY = 'icm-preflop-lab.config.v1';
 
@@ -22,13 +23,65 @@ function loadConfig(): SolverConfig {
   return DEFAULT_CONFIG;
 }
 
+type Mode = 'solver' | 'training';
+const MODE_KEY = 'icm-preflop-lab.mode';
+
+function ModeTabs({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
+  return (
+    <nav className="mode-tabs" aria-label="모드">
+      <button type="button" className={mode === 'solver' ? 'on' : ''} aria-current={mode === 'solver'} onClick={() => onMode('solver')}>솔버</button>
+      <button type="button" className={mode === 'training' ? 'on' : ''} aria-current={mode === 'training'} onClick={() => onMode('training')}>트레이닝</button>
+    </nav>
+  );
+}
+
+function Brand() {
+  return (
+    <div className="brand">
+      <span className="brand-mark" aria-hidden>♠</span>
+      <span className="brand-name">ICM Preflop Lab</span>
+    </div>
+  );
+}
+
 export function App() {
+  const [mode, setModeState] = useState<Mode>(() => {
+    try { return (localStorage.getItem(MODE_KEY) as Mode) || 'solver'; } catch { return 'solver'; }
+  });
+  const [trainingMounted, setTrainingMounted] = useState(mode === 'training');
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    if (m === 'training') setTrainingMounted(true);
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* ignore */ }
+  };
+  const tabs = <ModeTabs mode={mode} onMode={setMode} />;
+  return (
+    <>
+      <div hidden={mode !== 'solver'}>
+        <SolverApp tabs={tabs} />
+      </div>
+      {trainingMounted && (
+        <div hidden={mode !== 'training'} className="app-training">
+          <header className="topbar">
+            <Brand />
+            {tabs}
+          </header>
+          <TrainingView />
+        </div>
+      )}
+    </>
+  );
+}
+
+function SolverApp({ tabs }: { tabs: React.ReactNode }) {
   const [config, setConfig] = useState<SolverConfig>(loadConfig);
   const { state: solve, start, stop } = useSolver();
   const [path, setPath] = useState<number[]>([]);
   const [view, setView] = useState<GridView>('strategy');
   const [selected, setSelected] = useState<number | null>(null);
   const [hover, setHover] = useState<number | null>(null);
+  /** which panel is visible on narrow screens */
+  const [tab, setTab] = useState<'setup' | 'chart'>('setup');
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* ignore */ }
@@ -45,23 +98,24 @@ export function App() {
     () => (result && spot && decision ? playerReach(result, spot.trail, decision.player) : null),
     [result, spot, decision],
   );
+  const rare = useMemo(() => (result && spot ? rareSteps(result, spot.trail) : []), [result, spot]);
   const totals = useMemo(() => (result && decision && reach ? actionTotals(result, decision, reach) : null), [result, decision, reach]);
 
   const onStart = () => {
     setPath([]);
     setSelected(null);
+    setTab('chart');
     start(config);
   };
 
   const focusHand = hover ?? selected;
+  const go = (p: number[]) => { setPath(p); setHover(null); };
 
   return (
-    <div className="app">
+    <div className="app" data-tab={tab}>
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden>♠</span>
-          <span className="brand-name">ICM Preflop Lab</span>
-        </div>
+        <Brand />
+        {tabs}
         {solvedConfig && (
           <p className="spot-summary">
             {solvedConfig.stacks.length}인 · 앤티 {solvedConfig.ante}bb · {solvedConfig.mode === 'icm' ? 'ICM' : 'Chip EV'}
@@ -76,19 +130,27 @@ export function App() {
         {!tree && <EmptyBoard />}
         {tree && spot && (
           <>
-            <SeatRail tree={tree} path={path} node={spot.node} trail={spot.trail} onPath={setPath} />
+            <SeatRail tree={tree} path={path} node={spot.node} trail={spot.trail} onPath={go} />
 
             <div className="breadcrumbs" aria-label="액션 경로">
-              <button type="button" className="crumb" onClick={() => setPath([])} disabled={path.length === 0}>처음</button>
+              <button type="button" className="crumb" onClick={() => go([])} disabled={path.length === 0}>처음</button>
               {spot.trail.map((st, i) => (
-                <button type="button" key={i} className="crumb" onClick={() => setPath(path.slice(0, i + 1))}>
+                <button type="button" key={i} className="crumb" onClick={() => go(path.slice(0, i + 1))}>
                   <b>{tree.seatNames[st.node.player]}</b> {label(st.node.actions[st.action], st.node)}
                 </button>
               ))}
               {path.length > 0 && (
-                <button type="button" className="crumb back" onClick={() => setPath(path.slice(0, -1))}>한 단계 뒤로</button>
+                <button type="button" className="crumb back" onClick={() => go(path.slice(0, -1))}>한 단계 뒤로</button>
               )}
             </div>
+
+            {rare.length > 0 && (
+              <p className="rare-warning" role="note">
+                <b>희소 라인</b>
+                {rare.map((r) => `${tree.seatNames[r.seat]} ${r.label} (${(r.freq * 100).toFixed(2)}%)`).join(', ')}
+                {' '}— 균형 전략에서 거의 선택되지 않는 액션을 거친 지점입니다. 이후 전략과 EV는 수렴이 불안정하니 참고용으로만 보세요.
+              </p>
+            )}
 
             {decision && (
               <section className="decision">
@@ -108,7 +170,7 @@ export function App() {
 
                 <div className="actions">
                   {decision.actions.map((a, i) => (
-                    <button type="button" key={i} className="action-btn" onClick={() => setPath([...path, i])}
+                    <button type="button" key={i} className="action-btn" onClick={() => go([...path, i])}
                       style={{ ['--c' as string]: actionColor(a.type, raiseRank(decision, i)) }}>
                       <span className="action-name">{label(a, decision)}</span>
                       <span className="action-freq">{totals ? pct(totals.freq[i]) : '…'}</span>
@@ -127,7 +189,7 @@ export function App() {
                   )}
                   <div className="side">
                     {result && reach && focusHand !== null ? (
-                      <HandDetail result={result} node={decision} hand={focusHand} reach={reach[focusHand]} mode={tree.config.mode} />
+                      <HandDetail result={result} node={decision} hand={focusHand} reach={reach[focusHand]} mode={tree.config.mode} onClose={() => { setSelected(null); setHover(null); }} />
                     ) : (
                       <div className="detail empty">
                         <p className="eyebrow">핸드 상세</p>
@@ -174,6 +236,14 @@ export function App() {
         )}
         {focusHand !== null && <span className="sr-only" aria-live="polite">{classLabel(focusHand)}</span>}
       </main>
+
+      <nav className="tabbar" aria-label="화면 전환">
+        <button type="button" className={tab === 'setup' ? 'on' : ''} aria-current={tab === 'setup'} onClick={() => setTab('setup')}>설정</button>
+        <button type="button" className={tab === 'chart' ? 'on' : ''} aria-current={tab === 'chart'} onClick={() => setTab('chart')}>
+          차트
+          {(solve.status === 'building' || solve.status === 'solving') && <small>{solve.total ? Math.round((solve.iteration / solve.total) * 100) : 0}%</small>}
+        </button>
+      </nav>
     </div>
   );
 }

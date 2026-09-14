@@ -10,9 +10,10 @@ interface Props {
   hand: number;
   reach: number;
   mode: 'icm' | 'chip';
+  onClose: () => void;
 }
 
-export function HandDetail({ result, node, hand, reach, mode }: Props) {
+export function HandDetail({ result, node, hand, reach, mode, onClose }: Props) {
   const rows = node.actions.map((a, i) => ({
     a,
     i,
@@ -30,6 +31,7 @@ export function HandDetail({ result, node, hand, reach, mode }: Props) {
       <div className="detail-head">
         <span className="detail-hand">{classLabel(hand)}</span>
         <span className="detail-meta">{COMBOS[hand]}콤보 · 레인지 비중 {pct(reach, 0)}</span>
+        <button type="button" className="detail-close" onClick={onClose} aria-label="핸드 상세 닫기">닫기</button>
       </div>
       <table>
         <thead>

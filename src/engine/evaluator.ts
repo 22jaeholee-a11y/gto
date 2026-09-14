@@ -27,9 +27,14 @@ function topBits(mask: number, n: number): number {
 
 const CAT = 1 << 20;
 
+const SUIT = new Int32Array(4);
+const COUNTS = new Int8Array(13);
+
 export function evaluate7(cards: ArrayLike<number>): number {
-  const suitMask = [0, 0, 0, 0];
-  const counts = new Int8Array(13);
+  const suitMask = SUIT;
+  const counts = COUNTS;
+  suitMask.fill(0);
+  counts.fill(0);
   let rankMask = 0;
   for (let i = 0; i < 7; i++) {
     const c = cards[i];
@@ -38,6 +43,45 @@ export function evaluate7(cards: ArrayLike<number>): number {
     counts[r]++;
     rankMask |= 1 << r;
   }
+  return scoreFrom(suitMask, counts, rankMask);
+}
+
+/** Evaluates many two-card hands against one fixed five-card board without re-scanning the board. */
+export class BoardEvaluator {
+  private suit = new Int32Array(4);
+  private counts = new Int8Array(13);
+  private rankMask = 0;
+
+  constructor(board?: ArrayLike<number>) {
+    if (board) this.setBoard(board);
+  }
+
+  setBoard(board: ArrayLike<number>): void {
+    this.suit.fill(0);
+    this.counts.fill(0);
+    this.rankMask = 0;
+    for (let i = 0; i < board.length; i++) {
+      const c = board[i];
+      const r = c >> 2;
+      this.suit[c & 3] |= 1 << r;
+      this.counts[r]++;
+      this.rankMask |= 1 << r;
+    }
+  }
+
+  eval2(c1: number, c2: number): number {
+    SUIT.set(this.suit);
+    COUNTS.set(this.counts);
+    const r1 = c1 >> 2, r2 = c2 >> 2;
+    SUIT[c1 & 3] |= 1 << r1;
+    SUIT[c2 & 3] |= 1 << r2;
+    COUNTS[r1]++;
+    COUNTS[r2]++;
+    return scoreFrom(SUIT, COUNTS, this.rankMask | (1 << r1) | (1 << r2));
+  }
+}
+
+function scoreFrom(suitMask: Int32Array, counts: Int8Array, rankMask: number): number {
   for (let s = 0; s < 4; s++) {
     const m = suitMask[s];
     if (popcount(m) >= 5) {

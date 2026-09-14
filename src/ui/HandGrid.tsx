@@ -35,7 +35,7 @@ export const HandGrid = memo(function HandGrid({ result, node, reach, view, sele
   const digits = view === 'evIcm' ? 2 : 1;
 
   return (
-    <div className="grid" role="grid" aria-label="13×13 핸드 차트" onMouseLeave={() => onHover(null)}>
+    <div className="grid" role="grid" aria-label="13×13 핸드 차트" onPointerLeave={(e) => { if (e.pointerType === 'mouse') onHover(null); }}>
       {Array.from({ length: NUM_CLASSES }, (_, h) => {
         const w = reach[h];
         const dim = w < 0.001;
@@ -65,8 +65,7 @@ export const HandGrid = memo(function HandGrid({ result, node, reach, view, sele
             role="gridcell"
             key={h}
             className={`cell${dim ? ' dim' : ''}${selected === h ? ' sel' : ''}`}
-            onMouseEnter={() => onHover(h)}
-            onFocus={() => onHover(h)}
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') onHover(h); }}
             onClick={() => onSelect(h)}
             aria-label={classLabel(h)}
           >
