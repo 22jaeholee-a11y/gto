@@ -154,7 +154,9 @@ export class PostflopExplorer {
     if (this.heroCombo === combo) return;
     this.heroCombo = combo;
     this.cache.clear();
-    if (this.v.status === 'ready' || this.v.status === 'done') await this.solveStreet();
+    // 콤보는 플로어 주입에만 영향을 주므로 스트리트 도중에는 다시 풀지 않는다.
+    // (액션이 이미 진행됐거나 라인이 끝났으면 다음 솔브에서 반영된다)
+    if (this.v.status === 'ready' && this.v.node === 0) await this.solveStreet();
   }
 
   /** 현재 스트리트에 필요한 카드를 넘긴다 (플랍 3장, 턴·리버 1장). */
@@ -205,6 +207,8 @@ export class PostflopExplorer {
       this.emit({ result, status: 'ready', progress: 1 });
       await this.advance();
     } catch (e) {
+      // 이 되돌리기는 setCards가 이번 스트리트 카드를 방금 붙인 경우만 겨냥한다
+      // (setHeroCombo는 이제 스트리트 시작 지점에서만 다시 풀어 여기로 들어오지 않는다)
       this.emit({ status: 'need-cards', error: e instanceof Error ? e.message : '포스트플랍 솔브 실패', board: this.v.board.slice(0, this.v.board.length - CARDS_NEEDED[this.v.street]) });
     }
   }

@@ -7,7 +7,11 @@ import { preflopExit, type PostflopService, type PreflopExit } from './spot';
 import type { PostflopResult } from './solver';
 import { buildPostflopTree, DEFAULT_POSTFLOP_SIZING, type PDecision, type PostflopSpot } from './tree';
 
-/** 모든 결정 노드에서 액션을 고르게 섞는 가짜 솔버. 호출 횟수를 센다. */
+/**
+ * 모든 결정 노드에 대해 액션마다 다른 비중(합이 1)을 주는 가짜 솔버. 호출 횟수를 센다.
+ * 균등 전략이면 잘못된 액션 인덱스를 읽어도 레인지 축소 테스트가 통과해버리므로,
+ * 액션 a의 비중을 (a+1)/(A*(A+1)/2)로 둬 인덱스 실수를 드러낼 수 있게 한다.
+ */
 class FakeService implements PostflopService {
   calls = 0;
   lastRanges: [Float64Array, Float64Array] | null = null;
@@ -24,7 +28,12 @@ class FakeService implements PostflopService {
     for (const id of nodeIds) {
       const nd = tree.nodes[id] as PDecision;
       const A = nd.actions.length;
-      const s = new Float32Array(A * NC).fill(1 / A);
+      const denom = (A * (A + 1)) / 2;
+      const s = new Float32Array(A * NC);
+      for (let a = 0; a < A; a++) {
+        const w = (a + 1) / denom;
+        for (let k = 0; k < NC; k++) s[a * NC + k] = w;
+      }
       const e = new Float32Array(A * NC);
       for (let a = 0; a < A; a++) for (let k = 0; k < NC; k++) e[a * NC + k] = a;
       strategy.push(s);
@@ -48,6 +57,7 @@ function exitOf(): PreflopExit {
 
 const flop = ['2c', '7d', 'Ts'].map(parseCard);
 const heroCombo = COMBO_INDEX[parseCard('As') * 52 + parseCard('Kh')];
+const otherCombo = COMBO_INDEX[parseCard('Ad') * 52 + parseCard('Kd')];
 
 describe('PostflopExplorer', () => {
   it('시작할 때 플랍 3장을 요구한다', () => {
@@ -82,10 +92,14 @@ describe('PostflopExplorer', () => {
     const before = ex.state.ranges[0].slice();
     const node = ex.state.tree!.nodes[ex.state.node] as PDecision;
     const A = node.actions.length;
-    await ex.act(0);
+    // 0이 아닌 인덱스를 골라 잘못된 액션 인덱스를 읽으면 가중치가 어긋나게 한다
+    const actionIndex = 2;
+    const weight = (actionIndex + 1) / ((A * (A + 1)) / 2);
+    await ex.act(actionIndex);
     const after = ex.state.ranges[0];
     let live = 0;
-    for (let k = 0; k < NC; k++) if (before[k] > 0) { expect(after[k]).toBeCloseTo(before[k] / A, 9); live++; }
+    // Float32Array로 저장된 전략이라 정밀도가 float32 수준(~1e-7)으로 낮아진다
+    for (let k = 0; k < NC; k++) if (before[k] > 0) { expect(after[k]).toBeCloseTo(before[k] * weight, 6); live++; }
     expect(live).toBeGreaterThan(0);
   });
 
@@ -148,6 +162,34 @@ describe('PostflopExplorer', () => {
     await ex.undo(); // 턴 솔브 이전으로
     await ex.setCards([parseCard('3h')]);
     expect(svc.calls).toBe(2); // 캐시 적중
+  });
+
+  it('액션이 진행된 뒤에는 히어로 콤보를 바꿔도 다시 풀지 않는다', async () => {
+    const svc = new FakeService();
+    const ex = new PostflopExplorer(exitOf(), 7, svc);
+    await ex.setCards(flop);
+    const check = (nd: PDecision) => nd.actions.findIndex((a) => a.type === 'check');
+    await ex.act(check(ex.state.tree!.nodes[ex.state.node] as PDecision));
+    expect(svc.calls).toBe(1);
+    const node = ex.state.node;
+    await ex.setHeroCombo(otherCombo);
+    expect(svc.calls).toBe(1);
+    expect(ex.state.node).toBe(node);
+    expect(ex.state.status).toBe('ready');
+  });
+
+  it('라인이 끝난 뒤에는 히어로 콤보를 바꿔도 상태를 건드리지 않는다', async () => {
+    const ex = new PostflopExplorer(exitOf(), 7, new FakeService());
+    await ex.setCards(flop);
+    const oop = ex.state.tree!.nodes[ex.state.node] as PDecision;
+    const bet = oop.actions.findIndex((a) => a.type === 'bet');
+    await ex.act(bet);
+    const ip = ex.state.tree!.nodes[ex.state.node] as PDecision;
+    await ex.act(ip.actions.findIndex((a) => a.type === 'fold'));
+    expect(ex.state.status).toBe('done');
+    await ex.setHeroCombo(otherCombo);
+    expect(ex.state.status).toBe('done');
+    expect(ex.state.ending).not.toBeNull();
   });
 
   it('보드와 히어로 카드가 겹치지 않도록 dead 카드를 알려준다', async () => {
