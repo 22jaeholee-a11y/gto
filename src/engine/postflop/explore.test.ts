@@ -80,7 +80,11 @@ describe('PostflopExplorer', () => {
 
   it('히어로 콤보를 레인지에 남겨 솔버가 전략을 내게 한다', async () => {
     const svc = new FakeService();
-    const ex = new PostflopExplorer(exitOf(), 7, svc);
+    const exit = exitOf();
+    // exitOf()는 모든 클래스를 0.5로 채우므로 히어로 콤보를 미리 0으로 지워야
+    // 1e-5 플로어 주입이 실제로 동작하는지가 이 단언에서 드러난다
+    exit.ranges[0][heroCombo] = 0;
+    const ex = new PostflopExplorer(exit, 7, svc);
     await ex.setHeroCombo(heroCombo);
     await ex.setCards(flop);
     expect(svc.lastRanges![0][heroCombo]).toBeGreaterThan(0);
@@ -212,6 +216,43 @@ describe('PostflopExplorer', () => {
     const before = n;
     await ex.act(0);
     expect(n).toBe(before);
+  });
+
+  // design §6: hand.ts의 endPostflopStreet와 PostflopExplorer.closeStreet는 matched/pot/base를
+  // 계산하는 손으로 쓴 같은 산수를 각자 들고 있다. 여기서는 실제 베팅(체크-체크가 아닌 베트-콜)으로
+  // 스트리트를 닫아, 그 산수(matched = min(contrib0, contrib1); pot += 2*matched; base -= matched)를
+  // 테스트에서 손으로 다시 계산한 값과 대조해 둘 다 고정한다.
+  it('베트-콜로 스트리트가 닫히면 팟·남은 칩이 손으로 계산한 matched 산수와 일치한다', async () => {
+    const svc = new FakeService();
+    const exit = exitOf();
+    const ex = new PostflopExplorer(exit, 7, svc);
+    await ex.setCards(flop);
+
+    const oop = ex.state.tree!.nodes[ex.state.node] as PDecision;
+    const betIdx = oop.actions.findIndex((a) => a.type === 'bet');
+    const betTo = oop.actions[betIdx].to;
+    await ex.act(betIdx);
+
+    const ip = ex.state.tree!.nodes[ex.state.node] as PDecision;
+    const callIdx = ip.actions.findIndex((a) => a.type === 'call');
+    const callTo = ip.actions[callIdx].to;
+    await ex.act(callIdx);
+
+    // closeStreet가 수행하는 것과 같은 산수를 테스트에서 독립적으로 계산한다
+    const matched = Math.min(betTo, callTo);
+    const expectedPot = exit.pot + 2 * matched;
+    const expectedBehindOop = exit.base[exit.seats[0]] - matched; // seat 7 (BB, OOP)
+    const expectedBehindIp = exit.base[exit.seats[1]] - matched; // seat 4 (CO, IP)
+
+    expect(ex.state.status).toBe('need-cards');
+    expect(ex.state.street).toBe('turn');
+    expect(ex.state.pot).toBeCloseTo(expectedPot, 9);
+
+    // 다음 스트리트 카드를 받아야 새 baseStacks로 지은 트리의 root behind로 남은 칩을 볼 수 있다
+    await ex.setCards([parseCard('3h')]);
+    const root = ex.state.tree!.nodes[0] as PDecision;
+    expect(root.behind[0]).toBeCloseTo(expectedBehindOop, 9);
+    expect(root.behind[1]).toBeCloseTo(expectedBehindIp, 9);
   });
 });
 

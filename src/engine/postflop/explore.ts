@@ -207,8 +207,9 @@ export class PostflopExplorer {
       this.emit({ result, status: 'ready', progress: 1 });
       await this.advance();
     } catch (e) {
-      // 이 되돌리기는 setCards가 이번 스트리트 카드를 방금 붙인 경우만 겨냥한다
-      // (setHeroCombo는 이제 스트리트 시작 지점에서만 다시 풀어 여기로 들어오지 않는다)
+      // setCards와 setHeroCombo 중 어느 쪽이 이 솔브를 일으켰든, 실패하면 이번 스트리트의
+      // 카드를 받기 전 상태로 되돌린다 (setHeroCombo도 status==='ready' && node===0에서
+      // 여기로 들어올 수 있다)
       this.emit({ status: 'need-cards', error: e instanceof Error ? e.message : '포스트플랍 솔브 실패', board: this.v.board.slice(0, this.v.board.length - CARDS_NEEDED[this.v.street]) });
     }
   }

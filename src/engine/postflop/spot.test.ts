@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, type SolverConfig } from '../config';
 import { NUM_CLASSES } from '../cards';
+import { buildTree, postflopRank, type TerminalNode } from '../tree';
 import { CLASS_COMBOS, COMBO_CLASS, NC } from './combos';
 import { anteBySeat, classToComboWeights, normalizedPayouts, preflopExit } from './spot';
 
@@ -110,5 +111,51 @@ describe('preflopExit', () => {
       contrib: [0, 0, 0, 0, 2, 0, 2, 2],
       reachBySeat: reachBySeat(),
     })).toThrow();
+  });
+});
+
+// design §6: "같은 프리플랍 스팟에서 preflopExit가 hand.ts의 헤즈업 진입과 같은
+// 스팟·레인지·ICM 컨텍스트를 만든다" — hand.ts의 finalsAfterPreflop은 이 파일의
+// preflopExit와 별개로 `stacks - ante - contrib` 식을 다시 계산하므로, 실제 트리에서
+// 뽑은 헤즈업 플랍 종료 노드로 그 식과 seats·pot·icm 컨텍스트가 어긋나지 않는지 고정한다.
+describe('preflopExit ↔ hand.ts 헤즈업 진입 패리티', () => {
+  it('실제 트리의 헤즈업 플랍 종료 노드에서 base·seats·pot·icm이 hand.ts 공식과 일치한다', () => {
+    const config = DEFAULT_CONFIG;
+    const tree = buildTree(config);
+    const terminal = tree.nodes.find(
+      (nd): nd is TerminalNode => nd.kind === 'terminal' && nd.tType === 'flop' && nd.participants.length === 2,
+    );
+    expect(terminal).toBeDefined();
+    const t = terminal!;
+
+    // hand.ts의 finalsAfterPreflop(base = stacks - ante - contrib)을 여기서 독립적으로 계산한다
+    const ante = anteBySeat(config);
+    const expectedBase = config.stacks.map((s, j) => s - ante[j] - t.contrib[j]);
+
+    const reachBySeat: Float64Array[] = config.stacks.map(() => {
+      const a = new Float64Array(NUM_CLASSES);
+      a.fill(0.5);
+      return a;
+    });
+    const exit = preflopExit({ config, participants: t.participants, pot: t.pot, contrib: t.contrib, reachBySeat });
+
+    // seats: hand.ts가 preflopTerminal에서 postflopRank로 정렬해 넘기는 것과 같은 순서
+    const orderedSeats = t.participants
+      .slice()
+      .sort((a, b) => postflopRank(a, config.stacks.length) - postflopRank(b, config.stacks.length));
+    expect(exit.seats).toEqual(orderedSeats);
+
+    // base: 참가 좌석은 hand.ts의 독립 계산과 일치해야 한다
+    for (const seat of t.participants) expect(exit.base[seat]).toBeCloseTo(expectedBase[seat], 9);
+
+    // pot: 종료 노드의 팟을 그대로 넘겨받는다
+    expect(exit.pot).toBe(t.pot);
+
+    // icm 컨텍스트: 트레이닝 경로가 만드는 것과 같은 모드·정규화 상금·시작 스택·baseStacks·seats
+    expect(exit.icm.mode).toBe(config.mode);
+    expect(exit.icm.payouts).toEqual(normalizedPayouts(config));
+    expect(exit.icm.startStacks).toEqual(config.stacks);
+    expect(exit.icm.baseStacks).toEqual(exit.base);
+    expect(exit.icm.seats).toEqual(orderedSeats);
   });
 });

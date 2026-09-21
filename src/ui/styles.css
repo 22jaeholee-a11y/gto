@@ -389,10 +389,13 @@ button:disabled { cursor: default; opacity: 0.5; }
 .badge { font-size: 10px; padding: 1px 5px; border-radius: 999px; border: 1px solid currentColor; opacity: 0.8; }
 .situation-detail { padding: 8px 0 12px 10px; display: grid; gap: 10px; }
 .postflop-entries { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.coach { display: grid; gap: 6px; }
-.coach-headline { margin: 0; font-weight: 600; }
+/* training.css's unscoped .coach still matches this element and sets margin/padding/
+   border/border-radius/background; reset those explicitly so the solver's coach block
+   doesn't pick up training's panel look without touching training.css */
+.situation-detail .coach { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.situation-detail .coach-headline { margin: 0; font-weight: 600; }
 .coach-reason { margin: 0; opacity: 0.85; line-height: 1.5; }
-.coach-tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 0; }
+.situation-detail .coach-tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 0; }
 
 @media (max-width: 720px) {
   .situation-row { grid-template-columns: minmax(0, 1fr) auto; grid-auto-rows: auto; }

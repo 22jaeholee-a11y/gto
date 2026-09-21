@@ -151,7 +151,7 @@ export function PostflopView({ tree, result, entry, hand, hero, client, onClose 
           </div>
           {!heroIsActor && <p className="hint">상대 차례입니다. 액션을 고르면 그 액션으로 상대 레인지가 좁혀집니다. 표의 빈도와 EV는 여전히 내 핸드({comboText(combo)}) 기준입니다.</p>}
           {rangeReview && (
-            <RangePanel range={rangeReview} primary={primary} chosen={best ? best.i : 0} tab={rangeTab} onTab={setRangeTab} />
+            <RangePanel range={rangeReview} primary={primary} chosen={best ? best.i : -1} tab={rangeTab} onTab={setRangeTab} />
           )}
         </>
       )}
