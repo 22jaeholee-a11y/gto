@@ -369,7 +369,7 @@ button:disabled { cursor: default; opacity: 0.5; }
 }
 .mini-cell {
   font-size: 10px; padding: 3px 0; border: 1px solid transparent; border-radius: 3px;
-  background: var(--cell, #1b1f26); color: inherit; cursor: pointer; line-height: 1.1;
+  background: var(--cell-bg); color: inherit; cursor: pointer; line-height: 1.1;
 }
 .mini-cell.sel { border-color: currentColor; font-weight: 700; }
 .seat-picker .seg { flex-wrap: wrap; }
@@ -380,7 +380,7 @@ button:disabled { cursor: default; opacity: 0.5; }
   width: 100%; display: grid; align-items: center; gap: 8px;
   grid-template-columns: minmax(0, 1fr) 48px minmax(0, 150px) 56px 76px auto auto;
   padding: 8px 10px; border-radius: 6px; border: 1px solid transparent;
-  background: var(--panel, #161a20); color: inherit; text-align: left; cursor: pointer;
+  background: var(--panel); color: inherit; text-align: left; cursor: pointer;
 }
 .situation.open .situation-row { border-color: currentColor; }
 .situation-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

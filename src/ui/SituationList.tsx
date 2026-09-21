@@ -17,15 +17,21 @@ export interface PostflopEntry {
 }
 
 /**
- * 상황에서 히어로가 액션을 하나 고른 뒤 나머지가 행동을 마쳤을 때 도달하는
- * 헤즈업 플랍 종료 노드들을 모은다. 다른 좌석의 액션은 레인지 전체에서 가장 잦은 것을 따른다.
+ * 상황에서 히어로가 고를 수 있는 각 액션 이후로 갈 수 있는 모든 경로를 따라가며,
+ * 히어로가 참여하는 헤즈업 플랍 종료 노드를 전부 모은다. 한 상황이 여러 개의
+ * 서로 다른 헤즈업 플랍(예: BB가 콜한 라인, SB가 콜하고 BB는 폴드한 라인)으로
+ * 갈라질 수 있으므로 하나만 고르지 않고 전부 나열한다.
  */
 export function postflopEntries(tree: LightTree, situation: Situation, hero: number): PostflopEntry[] {
   const out: PostflopEntry[] = [];
+  // 트리는 순환이 없는 진짜 트리라 종료 노드가 두 번 방문될 수는 없다.
+  // 그래도 혹시 모를 재방문을 막기 위한 안전장치로만 둔다.
   const seen = new Set<number>();
 
   const walk = (id: number, steps: string[], depth: number): void => {
-    if (depth > 8) return;
+    // 재귀 폭주를 막기 위한 안전장치일 뿐, 실제 프리플랍 트리는 이보다 훨씬 얕아서
+    // 정상적인 라인을 이 한도가 잘라내는 일은 없어야 한다.
+    if (depth > 32) return;
     const node = tree.nodes[id];
     if (node.kind === 'terminal') {
       if (node.tType !== 'flop') return;

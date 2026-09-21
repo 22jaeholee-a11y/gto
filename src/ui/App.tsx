@@ -114,6 +114,7 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
     setTab('chart');
     setExpanded(null);
     setShowAll(false);
+    setHandSeat((s) => Math.min(s, config.stacks.length - 1));
     start(config);
   };
 
