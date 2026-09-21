@@ -80,7 +80,7 @@ export interface RangeReview {
 }
 
 /** Builds a RangeReview from per-unit weights (classes or combos) mapped onto classes. */
-function buildRangeReview(
+export function buildRangeReview(
   actions: string[],
   heroClass: number,
   units: number,

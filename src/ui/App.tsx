@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { classLabel } from '../engine/cards';
 import { DEFAULT_CONFIG, type SolverConfig } from '../engine/config';
 import { ConfigPanel } from './ConfigPanel';
 import { HandDetail } from './HandDetail';
 import { HandGrid, type GridView } from './HandGrid';
 import { HandView } from './HandView';
+import { PostflopView } from './PostflopView';
 import { SeatRail } from './SeatRail';
 import type { PostflopEntry } from './SituationList';
 import { actionColor, pct } from './format';
+import { PostflopClient } from './training/clients';
 import { actionTotals, label, playerReach, raiseRank, rareSteps, walkPath } from './spot';
 import { useSolver } from './useSolver';
 import { TrainingView } from './training/TrainingView';
@@ -89,6 +91,10 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
   const [handClass, setHandClass] = useState(0);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [postflop, setPostflop] = useState<PostflopEntry | null>(null);
+  const pfClient = useRef<PostflopClient | null>(null);
+  const getClient = () => (pfClient.current ??= new PostflopClient());
+  useEffect(() => () => pfClient.current?.dispose(), []);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* ignore */ }
@@ -115,6 +121,7 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
     setExpanded(null);
     setShowAll(false);
     setHandSeat((s) => Math.min(s, config.stacks.length - 1));
+    setPostflop(null);
     start(config);
   };
 
@@ -253,15 +260,19 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
         {tree && result && boardView === 'hand' && (
           <HandView
             tree={tree} result={result}
-            hand={handClass} onHand={(h) => { setHandClass(h); setExpanded(null); }}
-            seat={handSeat} onSeat={(s) => { setHandSeat(s); setExpanded(null); }}
+            hand={handClass} onHand={(h) => { setHandClass(h); setExpanded(null); setPostflop(null); }}
+            seat={handSeat} onSeat={(s) => { setHandSeat(s); setExpanded(null); setPostflop(null); }}
             expanded={expanded} onExpand={setExpanded}
-            onOpenPostflop={(e: PostflopEntry) => { void e; }}
+            onOpenPostflop={(e: PostflopEntry) => setPostflop(e)}
             showAll={showAll} onShowAll={setShowAll}
           />
         )}
         {tree && !result && boardView === 'hand' && (
           <p className="hint">솔브가 끝나면 상황 목록이 표시됩니다.</p>
+        )}
+        {tree && result && boardView === 'hand' && postflop && (
+          <PostflopView tree={tree} result={result} entry={postflop} hand={handClass} hero={handSeat}
+            client={getClient()} onClose={() => setPostflop(null)} />
         )}
         {focusHand !== null && <span className="sr-only" aria-live="polite">{classLabel(focusHand)}</span>}
       </main>
