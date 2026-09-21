@@ -5,7 +5,7 @@
 import { classLabel } from '../engine/cards';
 import { icmEquity } from '../engine/icm';
 import { anteBySeat, normalizedPayouts } from '../engine/postflop/spot';
-import type { SolveResult } from '../engine/solver';
+import { playerTemperatures, type SolveResult } from '../engine/solver';
 import type { PreflopCoachInput } from '../engine/training/coach';
 import { distributeSidePots } from '../engine/tree';
 import type { LightDecision, LightTerminal, LightTree } from '../worker/protocol';
@@ -91,7 +91,7 @@ export function buildPreflopCoachInput(
   const evChip = node.actions.map((_, i) => finite(evOf(result.evChip, result, node, i, hand)));
   const key = primary === 'icm' ? evIcm : evChip;
   const loss = Math.max(0, (key[best] ?? 0) - (key[chosen] ?? 0));
-  const lossBB = primary === 'icm' ? loss / bbPerIcm(tree, hero) : loss;
+  const lossBB = primary === 'icm' ? loss / playerTemperatures(tree, 1, 'icm')[hero] : loss;
 
   // 히어로 앞의 마지막 레이저
   let aggressor: number | null = null;
@@ -139,22 +139,6 @@ export function buildPreflopCoachInput(
 
 function finite(x: number): number | null {
   return Number.isFinite(x) ? x : null;
-}
-
-/** ICM %p 한 단위가 몇 bb인지 (손실을 bb로 환산할 때 쓴다). */
-function bbPerIcm(tree: LightTree, seat: number): number {
-  const { stacks } = tree.config;
-  const payouts = normalizedPayouts(tree.config);
-  const n = stacks.length;
-  const moved = (d: number) => {
-    const x = stacks.slice();
-    x[seat] += d;
-    for (let j = 0; j < n; j++) if (j !== seat) x[j] -= d / (n - 1);
-    return icmEquity(x, payouts)[seat] * 100;
-  };
-  const d = Math.min(0.5, stacks[seat] / 2);
-  const slope = (moved(d) - moved(-d)) / (2 * d);
-  return Math.max(1e-6, slope);
 }
 
 export type { PreflopCoachInput };
