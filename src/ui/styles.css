@@ -360,3 +360,42 @@ button:disabled { cursor: default; opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
   .meter-fill { transition: none; }
 }
+
+/* ---- 핸드 뷰 ---- */
+.board-view { margin: 0 0 12px; }
+.hand-view { display: grid; gap: 14px; }
+.hand-picker .mini-grid {
+  display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 2px;
+}
+.mini-cell {
+  font-size: 10px; padding: 3px 0; border: 1px solid transparent; border-radius: 3px;
+  background: var(--cell, #1b1f26); color: inherit; cursor: pointer; line-height: 1.1;
+}
+.mini-cell.sel { border-color: currentColor; font-weight: 700; }
+.seat-picker .seg { flex-wrap: wrap; }
+.hand-head h1 { margin: 0 0 4px; font-size: 18px; }
+
+.situations { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.situation-row {
+  width: 100%; display: grid; align-items: center; gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 48px minmax(0, 150px) 56px 76px auto auto;
+  padding: 8px 10px; border-radius: 6px; border: 1px solid transparent;
+  background: var(--panel, #161a20); color: inherit; text-align: left; cursor: pointer;
+}
+.situation.open .situation-row { border-color: currentColor; }
+.situation-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.situation-reach, .situation-freq, .situation-ev { font-variant-numeric: tabular-nums; text-align: right; }
+.situation-best { color: var(--c); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 10px; padding: 1px 5px; border-radius: 999px; border: 1px solid currentColor; opacity: 0.8; }
+.situation-detail { padding: 8px 0 12px 10px; display: grid; gap: 10px; }
+.postflop-entries { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.coach { display: grid; gap: 6px; }
+.coach-headline { margin: 0; font-weight: 600; }
+.coach-reason { margin: 0; opacity: 0.85; line-height: 1.5; }
+.coach-tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 0; }
+
+@media (max-width: 720px) {
+  .situation-row { grid-template-columns: minmax(0, 1fr) auto; grid-auto-rows: auto; }
+  .situation-best { grid-column: 1 / -1; }
+  .situation-freq, .situation-ev { grid-column: auto; }
+}

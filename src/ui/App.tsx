@@ -4,7 +4,9 @@ import { DEFAULT_CONFIG, type SolverConfig } from '../engine/config';
 import { ConfigPanel } from './ConfigPanel';
 import { HandDetail } from './HandDetail';
 import { HandGrid, type GridView } from './HandGrid';
+import { HandView } from './HandView';
 import { SeatRail } from './SeatRail';
+import type { PostflopEntry } from './SituationList';
 import { actionColor, pct } from './format';
 import { actionTotals, label, playerReach, raiseRank, rareSteps, walkPath } from './spot';
 import { useSolver } from './useSolver';
@@ -82,6 +84,11 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
   const [hover, setHover] = useState<number | null>(null);
   /** which panel is visible on narrow screens */
   const [tab, setTab] = useState<'setup' | 'chart'>('setup');
+  const [boardView, setBoardView] = useState<'range' | 'hand'>('range');
+  const [handSeat, setHandSeat] = useState(0);
+  const [handClass, setHandClass] = useState(0);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* ignore */ }
@@ -105,6 +112,8 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
     setPath([]);
     setSelected(null);
     setTab('chart');
+    setExpanded(null);
+    setShowAll(false);
     start(config);
   };
 
@@ -128,7 +137,13 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
 
       <main className="board">
         {!tree && <EmptyBoard />}
-        {tree && spot && (
+        {tree && (
+          <div className="seg board-view" role="radiogroup" aria-label="보기 전환">
+            <button type="button" role="radio" aria-checked={boardView === 'range'} className={boardView === 'range' ? 'on' : ''} onClick={() => setBoardView('range')}>레인지</button>
+            <button type="button" role="radio" aria-checked={boardView === 'hand'} className={boardView === 'hand' ? 'on' : ''} onClick={() => setBoardView('hand')}>핸드</button>
+          </div>
+        )}
+        {tree && spot && boardView === 'range' && (
           <>
             <SeatRail tree={tree} path={path} node={spot.node} trail={spot.trail} onPath={go} />
 
@@ -233,6 +248,19 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
               </section>
             )}
           </>
+        )}
+        {tree && result && boardView === 'hand' && (
+          <HandView
+            tree={tree} result={result}
+            hand={handClass} onHand={(h) => { setHandClass(h); setExpanded(null); }}
+            seat={handSeat} onSeat={(s) => { setHandSeat(s); setExpanded(null); }}
+            expanded={expanded} onExpand={setExpanded}
+            onOpenPostflop={(e: PostflopEntry) => { void e; }}
+            showAll={showAll} onShowAll={setShowAll}
+          />
+        )}
+        {tree && !result && boardView === 'hand' && (
+          <p className="hint">솔브가 끝나면 상황 목록이 표시됩니다.</p>
         )}
         {focusHand !== null && <span className="sr-only" aria-live="polite">{classLabel(focusHand)}</span>}
       </main>
