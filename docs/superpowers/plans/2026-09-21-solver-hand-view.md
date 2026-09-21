@@ -1745,6 +1745,7 @@ function Coach({ tree, result, situation, hand }: { tree: LightTree; result: Sol
     </div>
   );
 }
+```
 
 - [ ] **Step 2: 핸드 뷰를 만든다**
 
