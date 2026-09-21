@@ -14,6 +14,8 @@ import {
   buildPostflopTree, DEFAULT_POSTFLOP_SIZING, postflopActionLabel,
   type PDecision, type PostflopSpot, type PostflopTree, type Street as PStreet,
 } from '../postflop/tree';
+import { anteBySeat, normalizedPayouts, preflopExit, type PostflopService } from '../postflop/spot';
+export type { PostflopService } from '../postflop/spot';
 import type { Rand, Scenario } from './scenario';
 import { explainMultiway, explainPostflop, explainPreflop, summarizeHand, type Explanation, type HandSummary } from './coach';
 
@@ -25,10 +27,6 @@ export interface SolvedScenario {
   scenario: Scenario;
   tree: GameTree;
   result: SolveResult;
-}
-
-export interface PostflopService {
-  solve(spot: PostflopSpot, ranges: [Float64Array, Float64Array], onProgress?: (fraction: number) => void): Promise<PostflopResult>;
 }
 
 export type Verdict = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'info';
@@ -230,9 +228,8 @@ export class TrainingHand {
     const cfg = sc.tree.config;
     this.n = cfg.stacks.length;
     this.startStacks = cfg.stacks.slice();
-    this.ante = this.startStacks.map((s, i) => (i === this.n - 1 ? Math.min(cfg.ante, s) : 0));
-    const payTotal = cfg.payouts.reduce((a, b) => a + b, 0) || 1;
-    this.payouts = cfg.payouts.map((p) => p / payTotal);
+    this.ante = anteBySeat(cfg);
+    this.payouts = normalizedPayouts(cfg);
     this.totalChips = this.startStacks.reduce((a, b) => a + b, 0);
     this.heroSeat = heroSeat ?? Math.floor(rand() * this.n);
 
@@ -515,11 +512,15 @@ export class TrainingHand {
     const base = this.finalsAfterPreflop(t);
     const reach = ordered.map((seat) => this.preflopReach(seat));
     if (ordered.length === 2) {
+      const reachBySeat: Float64Array[] = this.startStacks.map(() => new Float64Array(N));
+      ordered.forEach((seat, i) => { reachBySeat[seat] = reach[i]; });
+      const exit = preflopExit({ config: this.sc.tree.config, participants: parts, pot: t.pot, contrib: t.contrib, reachBySeat });
       this.pf = {
-        seats: [ordered[0], ordered[1]],
-        ranges: reach.map((r) => classToComboWeights(r)) as [Float64Array, Float64Array],
-        pot: t.pot,
-        base,
+        seats: exit.seats,
+        ranges: exit.ranges,
+        pot: exit.pot,
+        base: exit.base,
+        icm: exit.icm,
         board: [],
         street: 'flop',
         tree: null,
@@ -609,16 +610,6 @@ export class TrainingHand {
 
   // ---------------------------------------------------------------- heads-up postflop (solver)
 
-  private icmContext(pf: PostflopState) {
-    return {
-      mode: this.sc.tree.config.mode,
-      payouts: this.payouts,
-      startStacks: this.startStacks,
-      baseStacks: pf.base.slice(),
-      seats: pf.seats,
-    } as PostflopSpot['icm'];
-  }
-
   private async nextPostflopStreet(): Promise<void> {
     const pf = this.pf!;
     const cards = pf.street === 'flop' ? 3 : 1;
@@ -641,7 +632,7 @@ export class TrainingHand {
       const k = this.comboOf(pf.seats[p]);
       if (pf.ranges[p][k] < 1e-5) pf.ranges[p][k] = 1e-5;
     }
-    const spot: PostflopSpot = { street: pf.street as PStreet, board: pf.board.slice(), pot: pf.pot, icm: this.icmContext(pf), sizing: DEFAULT_POSTFLOP_SIZING };
+    const spot: PostflopSpot = { street: pf.street as PStreet, board: pf.board.slice(), pot: pf.pot, icm: pf.icm, sizing: DEFAULT_POSTFLOP_SIZING };
     pf.tree = buildPostflopTree(spot);
     this.emit({ status: 'solving', solvingStreet: pf.street, solveProgress: 0 });
     pf.result = await this.service.solve(spot, [pf.ranges[0].slice(), pf.ranges[1].slice()], (x) => this.emit({ solveProgress: x }));
@@ -811,6 +802,7 @@ export class TrainingHand {
     const pf = this.pf!;
     const matched = Math.min(pf.contrib[0], pf.contrib[1]);
     for (let p = 0; p < 2; p++) pf.base[pf.seats[p]] -= matched;
+    pf.icm = { ...pf.icm, baseStacks: pf.base.slice() };
     pf.pot += 2 * matched;
     // uncalled excess goes back (only possible with an all-in for less)
     if (pf.street === 'river') return this.postflopShowdown();
@@ -1025,18 +1017,13 @@ interface PostflopState {
   pot: number;
   /** every seat's chips behind when the current street started */
   base: number[];
+  icm: PostflopSpot['icm'];
   board: number[];
   street: Street;
   tree: PostflopTree | null;
   result: PostflopResult | null;
   node: number;
   contrib: [number, number];
-}
-
-function classToComboWeights(reach: Float64Array): Float64Array {
-  const out = new Float64Array(NC);
-  for (let k = 0; k < NC; k++) out[k] = reach[COMBO_CLASS[k]];
-  return out;
 }
 
 function nanToNull(x: number): number | null {
