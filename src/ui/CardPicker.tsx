@@ -26,15 +26,15 @@ export function CardPicker({ need, dead, onPick }: Props) {
   return (
     <div className="card-picker">
       <p className="eyebrow">카드 {need}장 선택 ({picked.map(cardText).join(' ') || '없음'})</p>
-      <div className="card-grid">
+      <div className="card-grid" role="grid" aria-label="카드 선택">
         {Array.from({ length: 4 }, (_, suit) => (
-          <div className="card-row" key={suit}>
+          <div className="card-row" role="row" key={suit}>
             {Array.from({ length: 13 }, (_, i) => {
               const rank = 12 - i; // A부터
               const c = rank * 4 + suit;
               const off = blocked.has(c) && !picked.includes(c);
               return (
-                <button type="button" key={c} className={`pick s${suit}${picked.includes(c) ? ' on' : ''}`}
+                <button type="button" key={c} role="gridcell" className={`pick s${suit}${picked.includes(c) ? ' on' : ''}`}
                   disabled={off} onClick={() => toggle(c)} aria-label={cardText(c)}>
                   {RANKS[i]}<span className="suit">{SUIT_SYMBOLS[suit]}</span>
                 </button>
