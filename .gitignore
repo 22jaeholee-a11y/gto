@@ -4,3 +4,4 @@ dist
 *.cpuprofile
 .audit
 *.tsbuildinfo
+.superpowers
