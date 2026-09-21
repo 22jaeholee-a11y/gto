@@ -9,6 +9,7 @@ import { COMBOS, compatMul, NUM_CLASSES } from './cards';
 import { BROADWAY, BROADWAY_RANDOM, DEAD_WIN, matVec, matVec2, WIN } from './equity';
 import { icmEquity } from './icm';
 import { firstVs } from './multiway';
+import type { SolverConfig } from './config';
 import type { DecisionNode, GameTree, TerminalNode } from './tree';
 
 const N = NUM_CLASSES;
@@ -768,7 +769,7 @@ export class Solver {
 }
 
 /** logit temperature per player in the solver's utility: bb for chip EV, ICM %p per bb of that player's stack */
-export function playerTemperatures(tree: GameTree, tauBB: number, util: 'icm' | 'chip'): number[] {
+export function playerTemperatures(tree: { numPlayers: number; config: SolverConfig }, tauBB: number, util: 'icm' | 'chip'): number[] {
   const n = tree.numPlayers;
   if (util === 'chip') return new Array(n).fill(tauBB);
   const { stacks } = tree.config;
