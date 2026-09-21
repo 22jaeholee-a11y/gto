@@ -396,8 +396,19 @@ button:disabled { cursor: default; opacity: 0.5; }
 
 @media (max-width: 720px) {
   .situation-row { grid-template-columns: minmax(0, 1fr) auto; grid-auto-rows: auto; }
-  .situation-best { grid-column: 1 / -1; }
+  .situation-best { grid-column: 1 / -1; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   .situation-freq, .situation-ev { grid-column: auto; }
+  /* grid items default to min-width: auto (content-based), which lets long unwrapped
+     text force the row wider than the viewport; let these shrink to the row's width */
+  .coach, .postflop-entries { min-width: 0; }
+  .coach-headline, .coach-reason { overflow-wrap: anywhere; }
+  /* buttons default to flex-shrink: 0 in this browser's UA stylesheet, so a long crumb
+     label won't shrink or wrap on its own without an explicit override */
+  .postflop-entries .crumb { white-space: normal; text-align: left; flex-shrink: 1; min-width: 0; }
+  /* HandDetail's table is also used by the desktop range view's sidebar (.side .detail);
+     scope containment to the situation-detail context only so that view is unaffected */
+  .situation-detail .detail { min-width: 0; overflow-x: auto; }
+  .situation-detail .detail table { width: max-content; min-width: 100%; }
 }
 
 /* ---- 포스트플랍 탐색기 ---- */
