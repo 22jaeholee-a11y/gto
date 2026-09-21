@@ -90,8 +90,11 @@
 
 - 액션별 빈도 / ICM EV / Chip EV 전체 표 — 기존 `HandDetail` 컴포넌트를 재사용한다.
 - 그 노드의 레인지 요약(액션별 빈도·콤보) — 기존 `range-summary` 마크업 재사용.
-- 코치 해설 한 줄 — `src/engine/training/coach.ts`의 `explainPreflop`을 재사용한다. 이 함수는 이미
-  솔버 수치만으로 입력이 구성되므로(트레이닝 상태에 의존하지 않음) 그대로 호출할 수 있다.
+- 코치 해설 — `src/engine/training/coach.ts`의 `explainPreflop`을 재사용한다. 다만 입력 중
+  "콜하려면 에퀴티가 몇 % 필요한가"는 종료 노드의 ICM·칩 유틸리티가 있어야 하는데, 워커가 UI로 보내는
+  `LightTerminal`은 payload를 줄이려고 그 값들을 뺀다. 그래서 헤즈업 올인 쇼다운의 승·패 결과를
+  엔진(`buildTree`)과 같은 식(`distributeSidePots` + `icmEquity`)으로 다시 계산하는 얇은 빌더를 둔다.
+  이 빌더는 엔진 트리의 실제 유틸리티와 대조하는 테스트로 고정한다.
 - **포스트플랍 입구** — 이 상황에서 뻗어나가는 종료 노드 중 `tType === 'flop'`이고
   `participants.length === 2`인 것들을 모아 목록으로 보여주고 각각 "플랍 보기" 버튼을 단다.
   - 3인 이상 플랍 종료 노드는 "솔버 미지원 — 프리플랍 EV는 EQR 근사" 안내만 표시한다.
@@ -198,6 +201,7 @@ export class PostflopExplorer {
 
 | 파일 | 역할 |
 |---|---|
+| `src/ui/coachinput.ts` | 코치 해설 입력 구성, 종료 노드 유틸리티 재구성 (순수 함수, 테스트 있음) |
 | `src/ui/HandView.tsx` | 핸드 뷰 전체. 핸드·포지션 고정 바와 상황 목록/상세를 묶는다 |
 | `src/ui/SituationList.tsx` | 상황 목록과 행 상세 |
 | `src/ui/PostflopView.tsx` | 포스트플랍 탐색기 화면 |
