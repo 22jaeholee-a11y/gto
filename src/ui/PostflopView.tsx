@@ -21,10 +21,12 @@ interface Props {
   hand: number;
   hero: number;
   client: PostflopClient;
+  /** 닫기 버튼 문구 — 레인지 뷰에서는 패널을 닫는 대신 보드부터 다시 고른다 */
+  closeLabel?: string;
   onClose: () => void;
 }
 
-export function PostflopView({ tree, result, entry, hand, hero, client, onClose }: Props) {
+export function PostflopView({ tree, result, entry, hand, hero, client, closeLabel = '닫기', onClose }: Props) {
   const explorer = useMemo(() => {
     const terminal = tree.nodes[entry.terminalId];
     if (terminal.kind !== 'terminal') throw new Error('플랍 종료 노드가 아닙니다');
@@ -116,7 +118,7 @@ export function PostflopView({ tree, result, entry, hand, hero, client, onClose 
             </select>
           </label>
           <button type="button" className="crumb" onClick={() => void explorer.undo()} disabled={!explorer.canUndo()}>한 단계 뒤로</button>
-          <button type="button" className="crumb" onClick={onClose}>닫기</button>
+          <button type="button" className="crumb" onClick={onClose}>{closeLabel}</button>
         </div>
       </div>
 

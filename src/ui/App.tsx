@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG, type SolverConfig } from '../engine/config';
 import { ConfigPanel } from './ConfigPanel';
 import { HandDetail } from './HandDetail';
 import { HandGrid, type GridView } from './HandGrid';
+import { FlopEntry } from './FlopEntry';
 import { HandView } from './HandView';
 import { PostflopView } from './PostflopView';
 import { SeatRail } from './SeatRail';
@@ -239,7 +240,7 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
             )}
 
             {node && node.kind === 'terminal' && (
-              <section className="terminal">
+              <section className={`terminal${node.tType === 'flop' && node.participants.length === 2 ? ' with-flop' : ''}`}>
                 <p className="eyebrow">핸드 종료 지점</p>
                 <h1>
                   {node.tType === 'fold' && `${tree.seatNames[node.participants[0]]} 팟 획득 (${node.pot.toFixed(1)}bb)`}
@@ -248,11 +249,20 @@ function SolverApp({ tabs }: { tabs: React.ReactNode }) {
                 </h1>
                 <p className="hint">
                   {node.tType === 'flop'
-                    ? `팟 ${node.pot.toFixed(1)}bb. 플랍 이후 EV는 포지션·SPR 기반 에퀴티 실현(EQR) 근사로 계산했습니다.`
+                    ? `팟 ${node.pot.toFixed(1)}bb. 위 프리플랍 EV는 포지션·SPR 기반 에퀴티 실현(EQR) 근사입니다.`
                     : node.tType === 'showdown'
                       ? `팟 ${node.pot.toFixed(1)}bb. ${node.participants.length === 2 ? '프리플랍 에퀴티 테이블로 정확히 계산했습니다.' : '3인 올인은 1:1 에퀴티 기반 근사로 계산했습니다.'}`
                       : '다른 플레이어가 모두 폴드했습니다.'}
                 </p>
+                {node.tType === 'flop' && node.participants.length > 2 && (
+                  <p className="hint">3인 이상 플랍은 솔버가 지원하지 않아 EQR 근사까지만 제공합니다.</p>
+                )}
+                {node.tType === 'flop' && node.participants.length === 2 && (
+                  result
+                    ? <FlopEntry tree={tree} result={result} terminal={node} trail={spot.trail}
+                        hand={handClass} onHand={setHandClass} client={getClient()} />
+                    : <p className="hint">솔브가 끝나면 플랍 보드를 고르고 포스트플랍을 이어서 풀 수 있습니다.</p>
+                )}
               </section>
             )}
           </>

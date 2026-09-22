@@ -48,7 +48,7 @@ function num(x: number): number {
 }
 
 /** 경로를 한 줄로 압축한다. 폴드는 생략하고 마지막에 한 번만 알린다. */
-function pathLabel(tree: LightTree, trail: TrailStep[], hero: number): string {
+export function pathLabel(tree: LightTree, trail: TrailStep[], hero: number): string {
   const parts: string[] = [];
   let folded = false;
   for (const { node, action } of trail) {

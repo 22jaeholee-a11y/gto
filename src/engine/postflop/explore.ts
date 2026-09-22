@@ -154,6 +154,8 @@ export class PostflopExplorer {
     if (this.heroCombo === combo) return;
     this.heroCombo = combo;
     this.cache.clear();
+    // deadCards()가 바뀌었으니 카드 선택기가 내 홀카드를 막도록 구독자에게 알린다
+    this.emit({});
     // 콤보는 플로어 주입에만 영향을 주므로 스트리트 도중에는 다시 풀지 않는다.
     // (액션이 이미 진행됐거나 라인이 끝났으면 다음 솔브에서 반영된다)
     if (this.v.status === 'ready' && this.v.node === 0) await this.solveStreet();

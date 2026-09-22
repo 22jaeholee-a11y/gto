@@ -12,7 +12,10 @@ interface Props {
 }
 
 export function CardPicker({ need, dead, onPick }: Props) {
-  const [picked, setPicked] = useState<number[]>([]);
+  const [raw, setPicked] = useState<number[]>([]);
+  const deadSet = new Set(dead);
+  // 고른 뒤에 죽은 카드가 된 것(예: 수트를 바꿔 내 홀카드가 달라진 경우)은 선택에서 뺀다
+  const picked = raw.filter((c) => !deadSet.has(c));
   const blocked = new Set([...dead, ...picked]);
 
   const toggle = (c: number) => {

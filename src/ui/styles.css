@@ -414,6 +414,15 @@ button:disabled { cursor: default; opacity: 0.5; }
   .situation-detail .detail table { width: max-content; min-width: 100%; }
 }
 
+/* ---- 레인지 뷰의 플랍 진입 ---- */
+/* 종료 지점은 원래 짧은 안내문만 담아서 640px로 묶여 있다. 포스트플랍 차트가 들어가면 풀어준다 */
+.terminal.with-flop { max-width: none; }
+.flop-entry { display: grid; gap: 12px; margin-top: 14px; }
+.flop-entry-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.flop-entry-head .eyebrow { margin: 0; }
+/* 이 블록의 탐색기는 이미 종료 지점 안에 있어서 구분선이 겹쳐 보인다 */
+.flop-entry .postflop-view { margin-top: 0; padding-top: 0; border-top: 0; }
+
 /* ---- 포스트플랍 탐색기 ---- */
 .postflop-view { display: grid; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid currentColor; }
 .postflop-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

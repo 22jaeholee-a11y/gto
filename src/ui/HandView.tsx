@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import { classLabel, NUM_CLASSES } from '../engine/cards';
+import { classLabel } from '../engine/cards';
 import type { SolveResult } from '../engine/solver';
 import type { LightTree } from '../worker/protocol';
+import { HandPicker, SeatPicker } from './pickers';
 import { SituationList, type PostflopEntry } from './SituationList';
 import { MAX_ROWS, enumerateSituations } from './situations';
 
@@ -25,26 +26,9 @@ export function HandView({ tree, result, hand, onHand, seat, onSeat, expanded, o
 
   return (
     <section className="hand-view">
-      <div className="hand-picker">
-        <p className="eyebrow">핸드</p>
-        <div className="mini-grid" role="grid" aria-label="핸드 선택">
-          {Array.from({ length: NUM_CLASSES }, (_, h) => (
-            <button type="button" role="gridcell" key={h} className={`mini-cell${hand === h ? ' sel' : ''}`}
-              onClick={() => onHand(h)} aria-label={classLabel(h)} aria-selected={hand === h}>
-              {classLabel(h)}
-            </button>
-          ))}
-        </div>
-      </div>
+      <HandPicker hand={hand} onHand={onHand} />
 
-      <div className="seat-picker" role="radiogroup" aria-label="포지션 선택">
-        <p className="eyebrow">포지션</p>
-        <div className="seg">
-          {tree.seatNames.map((name, s) => (
-            <button type="button" role="radio" key={s} aria-checked={seat === s} className={seat === s ? 'on' : ''} onClick={() => onSeat(s)}>{name}</button>
-          ))}
-        </div>
-      </div>
+      <SeatPicker names={tree.seatNames} seat={seat} onSeat={onSeat} />
 
       <div className="hand-head">
         <h1><b>{classLabel(hand)}</b> · {tree.seatNames[seat]}</h1>

@@ -8,12 +8,13 @@ import { actionColor, pct, signed } from './format';
 import { actionTotals, label, playerReach, raiseRank, walkPath } from './spot';
 import type { Situation } from './situations';
 
-/** 이 상황에서 곧장 이어지는 헤즈업 플랍 종료 노드 하나. */
+/** 포스트플랍 탐색기의 진입점이 되는 헤즈업 플랍 종료 노드 하나. */
 export interface PostflopEntry {
-  situation: Situation;
   /** 종료 노드 id */
   terminalId: number;
   label: string;
+  /** 상황 목록에서 열었을 때의 출처. 포스트플랍 뷰에서 바로 고른 라인에는 없다. */
+  situation?: Situation;
 }
 
 /**
