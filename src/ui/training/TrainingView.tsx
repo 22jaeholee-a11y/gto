@@ -55,6 +55,10 @@ export function TrainingView() {
   const [selected, setSelected] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const counted = useRef({ reviews: 0, done: false });
+  // keyboard cursor: arrow keys move it across the action buttons, Enter fires the focused one
+  const [cursorAt, setCursorAt] = useState<{ key: string | null; index: number }>({ key: null, index: 0 });
+  const actionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const nextHandRef = useRef<HTMLButtonElement | null>(null);
 
   if (!pool.current) pool.current = new ScenarioPool(settings, target);
   if (!client.current) client.current = new PostflopClient();
@@ -124,6 +128,47 @@ export function TrainingView() {
       if (view.result.summary.worstIndex !== null) setSelected(view.result.summary.worstIndex);
     }
   }, [view]);
+
+  // ---- keyboard control: arrows move the cursor across the actions, Enter confirms,
+  // and once the hand is over Enter deals the next one from the "다음 핸드" button.
+  const heroOptions = view?.status === 'hero' && view.pending ? view.pending.options : null;
+  const pendingKey = view && heroOptions ? `${view.log.length}:${heroOptions.length}` : null;
+  // the cursor is scoped to one decision, so a new decision starts back at the first action
+  const cursor = cursorAt.key === pendingKey ? Math.min(cursorAt.index, (heroOptions?.length ?? 1) - 1) : 0;
+  const moveCursor = (step: number) => {
+    const n = heroOptions?.length ?? 0;
+    if (n > 0) setCursorAt({ key: pendingKey, index: (cursor + step + n) % n });
+  };
+  const canDeal = !!view && poolStatus.ready > 0 && (view.status === 'done' || view.status === 'hero');
+
+  useEffect(() => {
+    if (heroOptions) actionRefs.current[cursor]?.focus({ preventScroll: true });
+  }, [pendingKey, cursor, heroOptions]);
+
+  useEffect(() => {
+    if (view?.status === 'done' && canDeal) nextHandRef.current?.focus({ preventScroll: true });
+  }, [view?.status, canDeal]);
+
+  useEffect(() => {
+    if (!view) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      // if the user tabbed or clicked onto some other control, Enter belongs to that control
+      const elsewhere = !!t && (t.tagName === 'BUTTON' || t.tagName === 'A')
+        && t !== actionRefs.current[cursor] && t !== nextHandRef.current;
+      if (heroOptions) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1); }
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1); }
+        else if (e.key === 'Enter' && !elsewhere) { e.preventDefault(); act(cursor); }
+        return;
+      }
+      if (view.status === 'done' && canDeal && e.key === 'Enter' && !elsewhere) { e.preventDefault(); void newHand(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   const reviewRef = useRef<HTMLElement | null>(null);
   const selectDecision = (logIndex: number) => {
@@ -232,7 +277,8 @@ export function TrainingView() {
           <>
             <div className="train-bar">
               <ScenarioBar info={describeScenario(view.scenario.config, view.heroSeat)} />
-              <button type="button" className="pill" onClick={() => void newHand()} disabled={poolStatus.ready === 0 || (view.status !== 'done' && view.status !== 'hero')}>
+              <button type="button" ref={nextHandRef} className={`pill${view.status === 'done' && canDeal ? ' cursor' : ''}`}
+                onClick={() => void newHand()} disabled={poolStatus.ready === 0 || (view.status !== 'done' && view.status !== 'hero')}>
                 {view.status === 'done' ? '다음 핸드' : '새 핸드'}
               </button>
             </div>
@@ -248,11 +294,13 @@ export function TrainingView() {
                   </p>
                   <div className="actions">
                     {view.pending.options.map((label, i) => (
-                      <button key={i} type="button" className={`action-btn kind-${actionKind(label)}`} onClick={() => act(i)}>
+                      <button key={i} type="button" ref={(el) => { actionRefs.current[i] = el; }}
+                        className={`action-btn kind-${actionKind(label)}${i === cursor ? ' cursor' : ''}`} onClick={() => act(i)}>
                         <span className="action-name">{label}</span>
                       </button>
                     ))}
                   </div>
+                  <p className="key-hint">← → 방향키로 고르고 Enter로 선택</p>
                 </>
               )}
               {view.status === 'solving' && (
@@ -271,6 +319,7 @@ export function TrainingView() {
                   </span>
                 </div>
               )}
+              {view.status === 'done' && canDeal && <p className="key-hint">Enter를 누르면 다음 핸드</p>}
               {view.status === 'done' && view.result?.summary && (
                 <HandSummaryCard summary={view.result.summary} selected={shownIndex} onSelect={selectDecision} />
               )}

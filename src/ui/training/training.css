@@ -149,6 +149,11 @@
 .action-btn.kind-raise { --c: var(--act-raise); }
 .action-btn.kind-allin { --c: var(--act-allin); }
 .train-actions .action-btn { min-height: 44px; }
+.train-actions .action-btn.cursor { outline: 2px solid var(--brass); outline-offset: 1px; background: var(--panel-2); }
+.train-actions .action-btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+.train-bar .pill.cursor { outline: 2px solid var(--brass); outline-offset: 1px; border-color: var(--brass); color: var(--brass); }
+.key-hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+@media (max-width: 860px) { .key-hint { display: none; } }
 .meter.solving { max-width: 420px; }
 .result-line {
   display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; padding: 10px 14px;
