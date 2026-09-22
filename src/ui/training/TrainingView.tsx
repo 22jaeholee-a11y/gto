@@ -413,6 +413,8 @@ function Table({ view }: { view: HandView }) {
                     </span>
                   ) : view.allin[seat] ? (
                     <span className="bet-chip allin bare"><em>올인</em></span>
+                  ) : view.checked[seat] ? (
+                    <span className="bet-chip check bare" aria-label="체크"><em>체크</em></span>
                   ) : null}
                   {reveal && <span className="seat-reveal">{reveal.hand}</span>}
                 </span>

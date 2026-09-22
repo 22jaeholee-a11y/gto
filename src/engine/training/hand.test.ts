@@ -77,4 +77,41 @@ describe('TrainingHand', () => {
     expect(reviews).toBeGreaterThan(15);
     expect(rangeReviews).toBeGreaterThan(10);
   }, 300_000);
+
+  it('테이블에 체크한 좌석을 표시한다', async () => {
+    const sc = solvedScenario([12, 18, 15], [50, 30, 20]);
+    const rand = mulberry32(3);
+    let seenChecks = 0;
+    // 화면에 그려지는 모든 상태에서, checked는 "이번 스트리트의 마지막 로그가 Check인 좌석"과 같아야 한다
+    const verify = (hand: TrainingHand) => {
+      const v = hand.view;
+      if (v.status === 'done') return;
+      for (let seat = 0; seat < v.seatNames.length; seat++) {
+        const mine = v.log.filter((e) => e.street === v.street && e.seat === seat);
+        const last = mine[mine.length - 1];
+        const isCheck = !!last && last.text.endsWith('Check');
+        expect(v.checked[seat]).toBe(isCheck);
+        if (isCheck) seenChecks++;
+      }
+    };
+    for (let h = 0; h < 16; h++) {
+      const hand = new TrainingHand(sc, rand, service, h % 3);
+      hand.subscribe(() => verify(hand));
+      await hand.begin();
+      for (let guard = 0; guard < 30 && hand.view.status === 'hero'; guard++) {
+        const opts = hand.view.pending!.options;
+        // 체크가 있으면 자주 골라 체크 표시를 실제로 만들어낸다
+        const check = opts.findIndex((o) => o.startsWith('Check'));
+        const nonFold = opts.map((o, i) => [o, i] as const).filter(([o]) => !o.startsWith('Fold'));
+        const pick = check >= 0 && rand() < 0.7
+          ? check
+          : nonFold.length && rand() < 0.85 ? nonFold[Math.floor(rand() * nonFold.length)][1] : Math.floor(rand() * opts.length);
+        await hand.act(pick);
+      }
+      expect(hand.view.status).toBe('done');
+      // 핸드가 끝나면 베팅과 마찬가지로 체크 표시도 지운다
+      expect(hand.view.checked.every((c) => !c)).toBe(true);
+    }
+    expect(seenChecks).toBeGreaterThan(0);
+  }, 300_000);
 });

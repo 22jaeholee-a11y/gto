@@ -29,7 +29,8 @@ function loadConfig(): SolverConfig {
 }
 
 type Mode = 'solver' | 'training';
-const MODE_KEY = 'icm-preflop-lab.mode';
+// v2: 기본 화면을 트레이닝으로 바꾸면서, 예전에 저장된 'solver'가 계속 이기지 않도록 키를 올렸다
+const MODE_KEY = 'icm-preflop-lab.mode.v2';
 
 function ModeTabs({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
   return (
@@ -51,7 +52,7 @@ function Brand() {
 
 export function App() {
   const [mode, setModeState] = useState<Mode>(() => {
-    try { return (localStorage.getItem(MODE_KEY) as Mode) || 'solver'; } catch { return 'solver'; }
+    try { return (localStorage.getItem(MODE_KEY) as Mode) || 'training'; } catch { return 'training'; }
   });
   const [trainingMounted, setTrainingMounted] = useState(mode === 'training');
   const setMode = (m: Mode) => {

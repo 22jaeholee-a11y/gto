@@ -106,6 +106,8 @@
 .bet-chip em { font-style: normal; font-family: var(--font-body); font-size: 11px; font-weight: 700; }
 .bet-chip.allin { background: rgba(216, 87, 63, 0.2); border-color: var(--act-raise); color: #ffd6cc; }
 .bet-chip.bare { padding-left: 7px; }
+/* 체크는 칩이 나가지 않으므로 베팅 칩과 달리 차분하게 */
+.bet-chip.check { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.28); color: var(--muted); }
 .chip-coin {
   flex: none; width: 13px; height: 13px; border-radius: 50%;
   background: var(--brass); border: 2px dashed #f6e7bd; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);

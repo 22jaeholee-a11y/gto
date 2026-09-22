@@ -185,6 +185,8 @@ export interface HandView {
   bets: number[];
   folded: boolean[];
   allin: boolean[];
+  /** 이번 스트리트의 마지막 액션이 체크였던 좌석 (베팅과 달리 칩으로는 드러나지 않는다) */
+  checked: boolean[];
   button: number;
   status: 'running' | 'hero' | 'solving' | 'done';
   solvingStreet?: Street;
@@ -255,6 +257,7 @@ export class TrainingHand {
       bets: root.contrib.slice(),
       folded: root.folded.slice(),
       allin: root.allin.slice(),
+      checked: new Array(this.n).fill(false),
       button: this.n === 2 ? 0 : this.n - 3,
       status: 'running',
       solveProgress: 0,
@@ -309,6 +312,13 @@ export class TrainingHand {
     await this.runPreflop();
   }
 
+  /** 좌석의 이번 스트리트 마지막 액션이 체크인지 기록한다. 스트리트가 바뀌면 전부 지운다. */
+  private markChecked(seat: number, isCheck: boolean) {
+    const checked = this.v.checked.slice();
+    checked[seat] = isCheck;
+    this.v = { ...this.v, checked };
+  }
+
   private log(seat: number, text: string, street: Street, review?: ActionReview) {
     this.v = { ...this.v, log: [...this.v.log, { street, seat, text, review }] };
   }
@@ -335,6 +345,7 @@ export class TrainingHand {
       }
       const a = this.sample(this.preflopFreqs(nd, this.classOf(nd.player)));
       this.log(nd.player, `${this.v.seatNames[nd.player]} ${actionLabel(nd.actions[a], nd)}`, 'preflop');
+      this.markChecked(nd.player, nd.actions[a].type === 'check');
       this.preTrail.push({ node: nd, action: a });
       this.preNode = nd.actions[a].child;
     }
@@ -407,6 +418,7 @@ export class TrainingHand {
     const explanation = this.explainPreflopDecision(nd, options, option, best, primary, loss, lossBB, range);
     const review: ActionReview = { street: 'preflop', hand: this.handText(this.heroSeat), chosen: option, best, options, primary, loss, lossBB, verdict, approximate: false, notes, range, explanation };
     this.log(this.heroSeat, `${this.v.seatNames[this.heroSeat]} ${options[option].label}`, 'preflop', review);
+    this.markChecked(this.heroSeat, nd.actions[option].type === 'check');
     this.preTrail.push({ node: nd, action: option });
     this.preNode = nd.actions[option].child;
     this.v = { ...this.v, lastReview: review };
@@ -572,7 +584,7 @@ export class TrainingHand {
     const eq1 = icmEquity(finals, this.payouts, this.startStacks);
     const result: HandResult = { chip: finals[h] - this.startStacks[h], icm: (eq1[h] - eq0[h]) * 100, text, shown, summary: this.summary() };
     this.log(-1, text, this.v.street);
-    this.emit({ status: 'done', pending: null, result, stacks: finals.map((f) => Math.max(0, f)), bets: new Array(this.n).fill(0) });
+    this.emit({ status: 'done', pending: null, result, stacks: finals.map((f) => Math.max(0, f)), bets: new Array(this.n).fill(0), checked: new Array(this.n).fill(false) });
   }
 
   private summary(): HandSummary {
@@ -615,7 +627,7 @@ export class TrainingHand {
     const cards = pf.street === 'flop' ? 3 : 1;
     pf.board = [...pf.board, ...this.draw(cards)];
     pf.contrib = [0, 0];
-    this.v = { ...this.v, street: pf.street, board: pf.board.slice(), pot: pf.pot, bets: new Array(this.n).fill(0) };
+    this.v = { ...this.v, street: pf.street, board: pf.board.slice(), pot: pf.pot, bets: new Array(this.n).fill(0), checked: new Array(this.n).fill(false) };
     this.v.stacks = this.v.stacks.slice();
     for (const s of pf.seats) this.v.stacks[s] = pf.base[s];
     this.log(-1, `${streetName(pf.street)}: ${pf.board.map(cardText).join(' ')} (팟 ${pf.pot.toFixed(1)}bb)`, pf.street);
@@ -701,6 +713,7 @@ export class TrainingHand {
     const folded = this.v.folded.slice();
     if (action.type === 'fold') folded[seat] = true;
     this.log(seat, `${this.v.seatNames[seat]} ${label}`, pf.street, review);
+    this.markChecked(seat, action.type === 'check');
     this.v = { ...this.v, stacks, allin, folded, pot: pf.pot + pf.contrib[0] + pf.contrib[1], bets: this.betsView(pf) };
     pf.node = action.child;
   }
@@ -837,7 +850,7 @@ export class TrainingHand {
     const cards = mw.street === 'flop' ? 3 : 1;
     mw.board = [...mw.board, ...this.draw(cards)];
     mw.startRound();
-    this.v = { ...this.v, street: mw.street, board: mw.board.slice(), pot: mw.pot, bets: new Array(this.n).fill(0) };
+    this.v = { ...this.v, street: mw.street, board: mw.board.slice(), pot: mw.pot, bets: new Array(this.n).fill(0), checked: new Array(this.n).fill(false) };
     this.log(-1, `${streetName(mw.street)}: ${mw.board.map(cardText).join(' ')} (팟 ${mw.pot.toFixed(1)}bb, ${mw.live().length}인)`, mw.street);
     if (mw.live().filter((s) => mw.stack(s) > 1e-9).length <= 1) {
       if (mw.street === 'river') return this.multiwayShowdown();
@@ -867,6 +880,7 @@ export class TrainingHand {
       const eq = this.multiwayEquity(seat, 400);
       const choice = mw.botChoice(seat, opts, eq, this.rand);
       this.log(seat, `${this.v.seatNames[seat]} ${opts[choice].label}`, mw.street);
+      this.markChecked(seat, opts[choice].kind === 'check');
       mw.apply(seat, opts[choice]);
     }
   }
@@ -970,6 +984,7 @@ export class TrainingHand {
     });
     const review: ActionReview = { street: mw.street, hand: this.handText(seat), chosen: option, best, options, primary: 'chip', loss, lossBB: loss, verdict, approximate: true, notes, explanation };
     this.log(seat, `${this.v.seatNames[seat]} ${opts[option].label}`, mw.street, review);
+    this.markChecked(seat, opts[option].kind === 'check');
     mw.apply(seat, opts[option]);
     this.v = { ...this.v, lastReview: review };
     if (opts[option].kind === 'fold') return this.finishHeroFold(null);
